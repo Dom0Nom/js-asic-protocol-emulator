@@ -75,7 +75,9 @@ class HostPort:
             self.bitcnt = (self.bitcnt + 1) & 7
             if self.bitcnt == 0:
                 self.mo = self.byte(self.idx, self.sh_in) & 0xFF
-                self.idx = min(self.idx + 1, 255)
+                # past the header bytes only the index parity matters, so a
+                # long transaction wraps 255 -> 128 instead of saturating
+                self.idx = self.idx + 1 if self.idx < 255 else 128
             else:
                 self.mo = (self.mo << 1) & 0xFF
 

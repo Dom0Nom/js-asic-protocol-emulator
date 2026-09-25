@@ -288,6 +288,8 @@ module tempo_lane #(
       if (in_i != prev_i) begin
         rx_push = 1'b1; rxp_word = now; rxp_count = 5'd16; rxp_err = in_i;
       end
+      // commands do not run, but queued lw/start still apply (leave capture)
+      if (q0_v && (q0_kind == K_LW || q0_kind == K_START)) want_cfg = 1'b1;
     end else if (cur_v) begin
       // ---- stage 1: running command (Lane.run_cycle)
       if (frozen) begin

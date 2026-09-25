@@ -244,3 +244,109 @@ class SpiFlashLike(SpiSlave):
         if self._cmd == 0x02 and idx >= 4:
             self.mem[self._addr % len(self.mem)] = byte
             self._addr += 1
+
+
+def sfdp_image(size_bytes, page=256):
+    """A minimal SFDP area (JESD216 layout as parsed by Linux
+    drivers/mtd/spi-nor/sfdp.c, see docs/specs.md 3.2): header, one parameter
+    header for the Basic Flash Parameter Table, and a 9-DWORD BFPT whose
+    DWORD 2 holds the density in bits (size - 1)."""
+    img = bytearray([0xFF]) * 256
+    img[0:8] = b"SFDP" + bytes([0x06, 0x01, 0x00, 0xFF])  # rev 1.6, NPH = 0 (one header)
+    img[8:16] = bytes([0x00, 0x06, 0x01, 9, 0x80, 0x00, 0x00, 0xFF])  # BFPT, 9 DWORDs at 0x80
+    bfpt = [0] * 9
+    bfpt[0] = 0xFFF120E5  # 4 KB erase opcode 0x20 in bits 15:8
+    bfpt[1] = size_bytes * 8 - 1  # DWORD 2: density in bits, minus 1
+    for i, d in enumerate(bfpt):
+        img[0x80 + 4 * i:0x84 + 4 * i] = d.to_bytes(4, "little")
+    return img
+
+
+class SpiNorFlash(SpiSlave):
+    """SPI NOR flash (W25Q128JV-like command set, docs/specs.md section 3).
+
+    Commands: 0x9F JEDEC ID, 0x03 read, 0x0B fast read (8 dummy clocks),
+    0x05 status (bit 0 BUSY, bit 1 WEL), 0x06 WREN, 0x04 WRDI, 0x02 page
+    program (wraps inside the 256-byte page, only clears bits), 0x20 4 KB
+    sector erase, 0x5A SFDP (8 dummy clocks). Program and erase need WEL,
+    start at CS rising and keep BUSY for t_pp / t_se seconds (shortened in
+    tests). Protocol misuse is recorded in `violations` (kind 'protocol')."""
+
+    def __init__(self, sck, mosi, miso, cs, size=1 << 16, jedec_id=(0xEF, 0x40, 0x18),
+                 t_pp=0.4e-3, t_se=45e-3, clock_hz=50e6, mem=None, **kw):
+        kw.pop('response', None)
+        super().__init__(sck, mosi, miso, cs, response=None, **kw)
+        self.size = size
+        self.mem = mem if mem is not None else bytearray([0xFF]) * size
+        self.jedec_id = bytes(jedec_id)
+        self.sfdp = sfdp_image(size)
+        self.t_pp = max(1, round(t_pp * clock_hz))
+        self.t_se = max(1, round(t_se * clock_hz))
+        self.wel = False
+        self.busy_until = -1
+        self.cycle = 0
+        self.programs = self.erases = 0
+
+    def step(self, cycle, nets):
+        self.cycle = cycle
+        return super().step(cycle, nets)
+
+    @property
+    def busy(self):
+        return self.cycle < self.busy_until
+
+    def _status(self):
+        return int(self.busy) | int(self.wel) << 1
+
+    def _addr(self, m):
+        return (m[1] << 16 | m[2] << 8 | m[3]) if len(m) >= 4 else 0
+
+    def _next_response_byte(self, idx, m):
+        if idx == 0 or not m:
+            return 0
+        cmd = m[0]
+        if cmd == 0x05:
+            return self._status()
+        if self.busy:
+            return 0xFF
+        if cmd == 0x9F:
+            return self.jedec_id[idx - 1] if idx - 1 < len(self.jedec_id) else 0
+        if cmd == 0x03 and idx >= 4:
+            return self.mem[(self._addr(m) + idx - 4) % self.size]
+        if cmd == 0x0B and idx >= 5:
+            return self.mem[(self._addr(m) + idx - 5) % self.size]
+        if cmd == 0x5A and idx >= 5:
+            return self.sfdp[(self._addr(m) + idx - 5) & 0xFF]
+        return 0
+
+    def _end_transaction(self, cycle):
+        super()._end_transaction(cycle)
+        m = self.transactions[-1][0]
+        if not m:
+            return
+        cmd = m[0]
+        if self.busy and cmd != 0x05:
+            self.violations.append(SpiViolation(cycle, 'protocol', f'command {cmd:#04x} while busy'))
+            return
+        if cmd == 0x06:
+            self.wel = True
+        elif cmd == 0x04:
+            self.wel = False
+        elif cmd in (0x02, 0x20):
+            if not self.wel:
+                self.violations.append(SpiViolation(cycle, 'protocol', f'{cmd:#04x} without WREN'))
+                return
+            a = self._addr(m)
+            if cmd == 0x02:
+                page = a & ~0xFF
+                for i, b in enumerate(m[4:]):
+                    p = page | ((a + i) & 0xFF)
+                    self.mem[p % self.size] &= b
+                self.busy_until = cycle + self.t_pp
+                self.programs += 1
+            else:
+                s = a & ~0xFFF
+                self.mem[s:s + 0x1000] = b"\xFF" * 0x1000
+                self.busy_until = cycle + self.t_se
+                self.erases += 1
+            self.wel = False

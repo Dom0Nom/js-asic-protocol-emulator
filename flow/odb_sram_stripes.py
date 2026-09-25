@@ -73,8 +73,11 @@ def lef_tall_metal4_obs(macro_name):
                    "(array L / band / array R); the macro's internal mesh "
                    "carries whatever a region is not fed directly")
 @click.option("--lef", "lefs", multiple=True, help="SRAM macro LEF file")
+@click.option("--grid-report-dir", default=None,
+              help="Run the PSM connectivity check on the rewritten grid and "
+                   "write <net>-grid-errors.rpt here")
 @click_odb
-def extend(reader, layer, min_pairs, lefs):
+def extend(reader, layer, min_pairs, lefs, grid_report_dir):
     for path in lefs:
         LEF_PATHS[os.path.splitext(os.path.basename(path))[0]] = path
     block = reader.block
@@ -670,6 +673,18 @@ def extend(reader, layer, min_pairs, lefs):
             f"added {added} SRAM-column stripe(s)"
         )
         tidy(net_name, swire, bpin, rails)
+
+    # GeneratePDN checked the grid before the SRAM columns were connected,
+    # so its violation counts describe an intermediate state. Check again.
+    if grid_report_dir:
+        for net_name in ("VPWR", "VGND"):
+            path = os.path.join(grid_report_dir, f"{net_name}-grid-errors.rpt")
+            open(path, "w").close()
+            reader.design.evalTclString(
+                f"catch {{check_power_grid -net {net_name} -error_file {path}}}"
+            )
+            n = sum(1 for line in open(path) if line.startswith("violation type:"))
+            print(f"[INFO] {net_name}: power grid check after the SRAM columns: {n} violation(s)")
 
 
 if __name__ == "__main__":

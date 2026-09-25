@@ -185,6 +185,9 @@ class Link:
                 raise TempoError("image %s has no parameter %s" % (image["name"], name))
             words[p[name] - base] = value & 0xFFFF
         self.write_imem(base, words)
+        self.param_values = {}
+        for name, a in p.items():
+            self.param_values[name] = words[a - base]
         # drain anything a previous image left in the thread-to-host mailbox
         while self.get_some():
             pass

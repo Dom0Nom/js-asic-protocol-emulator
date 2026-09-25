@@ -49,8 +49,9 @@ class UartRx:
         frame had no interior transitions to measure from.
     """
 
-    def __init__(self, net, baud, bits=8, parity=None, stop=1, clock_hz=50e6):
+    def __init__(self, net, baud, bits=8, parity=None, stop=1, clock_hz=50e6, invert=False):
         self.net = net
+        self.invert = int(invert)  # line idles low, bits inverted (e.g. RS-232 levels after a plain buffer)
         self.baud = baud
         self.bits = bits
         self.parity = parity
@@ -72,7 +73,7 @@ class UartRx:
         self._parity_slot = bits + 1 if parity else None
 
     def step(self, cycle, nets):
-        level = nets.get(self.net, 1)
+        level = nets.get(self.net, 1 - self.invert) ^ self.invert
 
         if level != self._prev_level:
             if self._in_frame:
@@ -161,8 +162,10 @@ class UartTx(object):
     Useful for feeding a UartRx a signal at the wrong rate.
     """
 
-    def __init__(self, net, baud, bits=8, parity=None, stop=1, clock_hz=50e6, baud_error=0.0):
+    def __init__(self, net, baud, bits=8, parity=None, stop=1, clock_hz=50e6, baud_error=0.0,
+                 invert=False):
         self.net = net
+        self.invert = int(invert)
         self.bits = bits
         self.parity = parity
         self.stop = stop
@@ -188,14 +191,17 @@ class UartTx(object):
             self._queue.extend(frame)
 
     def step(self, cycle, nets):
+        return {self.net: self._step(cycle) ^ self.invert}
+
+    def _step(self, cycle):
         if not self._active:
             if not self._queue:
                 self._level = 1
-                return {self.net: 1}
+                return 1
             self._level = self._queue.popleft()
             self._phase_start = cycle
             self._active = True
-            return {self.net: self._level}
+            return self._level
 
         if cycle >= self._phase_start + self.cycles_per_bit:
             self._phase_start += self.cycles_per_bit
@@ -205,4 +211,4 @@ class UartTx(object):
                 self._active = False
                 self._level = 1
 
-        return {self.net: self._level}
+        return self._level

@@ -303,6 +303,10 @@ class Lane:
         if bit(self.regs[MODE], 7):  # capture mode
             if i_ != prev_i:
                 self.rx_new.append((now, 16, 0, i_))
+            # commands do not run, but queued lw/start still apply, so
+            # firmware can leave capture mode
+            if self.queue and self.queue[0].kind in ("lw", "start"):
+                self.apply_cfg(self.queue.popleft())
             return
 
         self._m_start, self._prev_i = m_start, prev_i

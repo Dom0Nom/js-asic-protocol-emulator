@@ -178,7 +178,7 @@ module tempo_host (
           bitcnt <= (cs_active ? bitcnt : bitcnt_first) + 3'd1;
           if ((cs_active ? bitcnt : bitcnt_first) == 3'd7) begin
             mo <= out;
-            idx <= (cs_active ? idx : 8'd0) == 8'd255 ? 8'd255 : (cs_active ? idx : 8'd0) + 8'd1;
+            idx <= (cs_active ? idx : 8'd0) == 8'd255 ? 8'd128 : (cs_active ? idx : 8'd0) + 8'd1;  // keep parity
             if (!cs_active || idx == 8'd0) cmd <= b;
             hi <= n_hi; addr <= n_addr; thread <= n_thread; rreg <= n_rreg; word <= n_word;
             rcnt <= n_rcnt;
