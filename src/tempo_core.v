@@ -48,7 +48,7 @@ module tempo_core (
   reg [2:0]  ldi_rd [0:3];
   reg        fv1, irv;
   reg [15:0] ir;
-  reg [15:0] scratch [0:31];
+  reg [15:0] scratch [0:7];
   reg [15:0] gout, goe;
   reg [7:0]  ev;
   reg [15:0] h2t [0:3];
@@ -92,7 +92,7 @@ module tempo_core (
   wire [2:0] xi = use_c ? fc3 : fa;
   wire [15:0] rx_ = regs[{te, xi}];   // port X: [11:9] or [5:3]
   wire [15:0] ry  = regs[{te, fb}];   // port Y: [8:6]
-  wire [4:0] saddr = ry[4:0] + ir[4:0];  // scratch address, mod 32
+  wire [2:0] saddr = ry[2:0] + ir[2:0];  // scratch address, mod 8
 
   wire illegal_insn =
       (op == OP_ALU2 && fn6[5:4] == 2'b00 && fn6[3]) ||
@@ -134,6 +134,12 @@ module tempo_core (
   reg  [15:0] tdiff;
   reg  [1:0]  li;
   integer     q;
+
+  function [15:0] brev16;
+    input [15:0] v;
+    integer k;
+    for (k = 0; k < 16; k = k + 1) brev16[k] = v[15 - k];
+  endfunction
   reg         pc_conf;
 
   genvar gi;
@@ -243,7 +249,7 @@ module tempo_core (
               ALU2_CMP[2:0]: begin wr_en = 1'b0; nz_val = rx_ - a; set_c = 1'b1; c_val = (rx_ >= a); end
               ALU2_TST[2:0]: begin wr_en = 1'b0; nz_val = rx_ & a; end
               ALU2_PAR[2:0]: res = {15'd0, ^a};
-              ALU2_BREV[2:0]: for (q = 0; q < 16; q = q + 1) res[q] = a[15 - q];
+              ALU2_BREV[2:0]: res = brev16(a);
               default: res = {a[7:0], a[15:8]};
             endcase
           end
@@ -423,7 +429,8 @@ module tempo_core (
         pc[q] <= 10'd0; ldi_addr[q] <= 10'd0; ldi_rd[q] <= 3'd0; h2t[q] <= 16'd0; t2h[q] <= 16'd0;
       end
       for (q = 0; q < 32; q = q + 1) begin
-        regs[q] <= 16'd0; scratch[q] <= 16'd0;
+        regs[q] <= 16'd0;
+        if (q < 8) scratch[q[2:0]] <= 16'd0;
       end
       fv1 <= 1'b0; irv <= 1'b0; ir <= 16'd0;
       gout <= 16'd0; goe <= 16'd0; ev <= 8'd0; h2t_n <= 3'd0; t2h_n <= 3'd0;

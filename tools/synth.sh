@@ -18,5 +18,8 @@ yosys -q -l "$LOG" -p "
   tee -o $LOG.stat stat -liberty $LIB
 " >/dev/null
 grep -iE "error" "$LOG" | head -5 || true
+if grep -qE "Latch inferred|conflicting drivers" "$LOG"; then
+  echo "SYNTH CHECK FAILED: latch or multiple drivers"; grep -E "Latch inferred|conflicting drivers" "$LOG" | head -5; exit 1
+fi
 awk '/Number of cells|cells$/ && !done {print} /Chip area/ {print; done=1}' "$LOG.stat"
 grep -E "dfrbp|dlh" "$LOG.stat" | awk '{s+=$1} END {print "flops/latches:", s}'

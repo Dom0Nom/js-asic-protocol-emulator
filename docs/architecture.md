@@ -52,7 +52,7 @@ Closest prior art, and what is borrowed: barrel threads and timed, timestamped p
 Direct bit-banging stays first class. A thread can move any lane pin with cycle-exact timing using `start` (schedule) plus `emit` (raw levels), without any line coding. Protocols with no use for the coding pipeline, such as PS/2 or custom sensor buses, are written this way.
 
 - Program loading: host SPI port on 4 pins (`ui[7:5]`, `uo[7]`) writes the instruction SRAM, sets thread PCs, starts, stops and single-steps threads, reads registers of halted threads, and exchanges words with firmware through mailbox FIFOs while threads run.
-- Size (re-estimated after the review): barrel core with 32 x 16-bit registers and a 32-word latch scratch RAM about 4k cells, full lanes about 1.8k cells each, lite lanes (no NRZI, stuffing, CRC, resync) about 1.3k each, host port 0.8k, registered pin resolution 0.8k: about 12.5k cells, roughly 250k um², plus the 80k um² SRAM. About 60% of the usable area.
+- Size (re-estimated after the review): barrel core with 32 x 16-bit registers and an 8-word scratch memory about 4k cells, full lanes about 1.8k cells each, lite lanes (no NRZI, stuffing, CRC, resync) about 1.3k each, host port 0.8k, registered pin resolution 0.8k: about 12.5k cells, roughly 250k um², plus the 80k um² SRAM. About 60% of the usable area.
 
 ## Firmware sketches
 
@@ -147,7 +147,7 @@ This section is normative. `tools/tempo/isa.py` holds the encoding tables and `t
 |---|---|---|
 | `NOW` | 16 | Cycle counter, increments every cycle, wraps. Reset 0. |
 | `IMEM` | 1024 x 16 | Instruction SRAM, shared by all threads; threads can read it with `ldi`. |
-| `SRAM` (scratch) | 32 x 16 | Latch-array scratch memory for threads (`ld`/`st`). |
+| scratch | 8 x 16 | Scratch memory shared by the threads (`ld`/`st`). Constant tables live in IMEM (`ldi`), bulk data moves through the mailboxes. |
 | `GOUT`, `GOE` | 16, 16 | GPIO value and enable for pins no lane drives. |
 | `EV` | 8 | Event flags for thread-to-thread signalling. |
 | `H2T`, `T2H` | 4 x 16 each | Mailbox FIFOs, host to threads and threads to host. |
@@ -187,7 +187,7 @@ After the host sets a thread's run bit in cycle `c`, the thread first executes i
 | 4 | `cmpi rd, simm9` | same | flags of `rd - sext(imm)`. |
 | 5 | `andi rd, simm9` | same | `rd &= sext(imm)`, sets Z, N. `andi r, 0xFF` masks a byte; `andi r, -256` clears it. |
 | 6 | IMM8 | `rd[11:9] sel imm` | `[8]=0`: `lih rd, imm8`, `rd = imm8 << 8 | rd[7:0]`, flags unchanged. `[8:7]=10`: `ori rd, imm7`; `[8:7]=11`: `xori rd, imm7`, zero-extended `[6:0]`, set Z, N. |
-| 7 | `ld`/`st` | `r[11:9] rs[8:6] st[5] off[4:0]` | address `(rs + off) mod 32` in scratch. `ld` writes `r`, `st` stores `r`. |
+| 7 | `ld`/`st` | `r[11:9] rs[8:6] st[5] off[4:0]` | address `(rs + off) mod 8` in scratch. `ld` writes `r`, `st` stores `r`. |
 | 8 | `b cc, simm9` | `cc[11:9] off[8:0]` | `cc`: `al eq ne cs cc mi pl hi` (hi = C and not Z). |
 | 9 | `djnz rd, simm9` | `rd[11:9] off[8:0]` | `rd -= 1`; branch if the result is not 0. Flags unchanged. |
 | A | `j`/`call` | `link[11] 0[10] target[9:0]` | `PC = target`; `call` also writes `r7 = PC + 1`. |
