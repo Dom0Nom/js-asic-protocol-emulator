@@ -1,0 +1,22 @@
+[tasks]
+prove
+bmc
+
+[options]
+prove: mode prove
+prove: depth 8
+bmc: mode bmc
+bmc: depth 30
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+read_verilog -formal -DFORMAL -I. tempo_core.v tempo_host.v lane_stub.v
+prep -top tempo_core
+
+[files]
+../src/tempo_core.v
+../src/tempo_host.v
+../src/tempo_isa.vh
+lane_stub.v

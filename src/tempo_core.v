@@ -530,4 +530,25 @@ module tempo_core (
   end
 
   wire _unused = &{imm9, lane_flags, h_rd_capture, 1'b0};
+`ifdef FORMAL
+  // Barrel isolation and mailbox bounds (formal/core.sby). Lanes may be
+  // replaced by free-running stubs, so nothing here depends on lane behaviour.
+  reg f_past = 1'b0;
+  always @(posedge clk) f_past <= 1'b1;
+  integer ft_, fr_;
+  always @* if (!f_past) assume(!rst_n);  // start from reset
+  always @(posedge clk) begin
+    if (f_past && rst_n && $past(rst_n)) begin
+      assert(h2t_n <= 3'd4 && t2h_n <= 3'd4);
+      for (ft_ = 0; ft_ < 4; ft_ = ft_ + 1) begin
+        if ($past(te) != ft_[1:0]) begin
+          for (fr_ = 0; fr_ < 8; fr_ = fr_ + 1)
+            assert(regs[ft_ * 8 + fr_] == $past(regs[ft_ * 8 + fr_]));
+          assert(pc[ft_] == $past(pc[ft_]) || ($past(hp_pc_v) && $past(hp_pc_t) == ft_[1:0]));
+          assert(fz[ft_] == $past(fz[ft_]) && fc[ft_] == $past(fc[ft_]) && fn[ft_] == $past(fn[ft_]));
+        end
+      end
+    end
+  end
+`endif
 endmodule
