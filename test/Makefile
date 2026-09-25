@@ -6,13 +6,15 @@ SIM ?= icarus
 FST ?= -fst # Use more efficient FST format
 TOPLEVEL_LANG ?= verilog
 SRC_DIR = $(PWD)/../src
-PROJECT_SOURCES = project.v
+PROJECT_SOURCES = project.v tempo_core.v tempo_lane.v tempo_host.v
 
 ifneq ($(GATES),yes)
 
 # RTL simulation:
 SIM_BUILD				= sim_build/rtl
 VERILOG_SOURCES += $(addprefix $(SRC_DIR)/,$(PROJECT_SOURCES))
+VERILOG_SOURCES += $(PWD)/sram/RM_IHPSG13_1P_1024x16_c2_bm_bist.v $(PWD)/sram/RM_IHPSG13_1P_core_behavioral_bm_bist.v
+COMPILE_ARGS    += -DFUNCTIONAL
 
 else
 
@@ -26,6 +28,7 @@ VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/verilo
 
 # this gets copied in by the GDS action workflow
 VERILOG_SOURCES += $(PWD)/gate_level_netlist.v
+VERILOG_SOURCES += $(PWD)/sram/RM_IHPSG13_1P_1024x16_c2_bm_bist.v $(PWD)/sram/RM_IHPSG13_1P_core_behavioral_bm_bist.v
 
 endif
 

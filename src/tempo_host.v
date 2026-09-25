@@ -27,16 +27,18 @@ module tempo_host (
     input  wire [15:0] reg_val,
     input  wire [15:0] imem_rdata,
 
-    output reg         ctl_v,
-    output reg  [7:0]  ctl,
-    output reg         pc_v,
-    output reg  [1:0]  pc_t,
-    output reg  [9:0]  pc_val,
-    output reg         h2t_v,
-    output reg  [15:0] h2t_word,
-    output reg         t2h_pop,
-    output reg         step_v,
-    output reg  [1:0]  step_t,
+    // strobes valid in the cycle a byte completes; the core applies them at
+    // the same clock edge (after the thread commit, so the host wins)
+    output wire        ctl_v,
+    output wire [7:0]  ctl,
+    output wire        pc_v,
+    output wire [1:0]  pc_t,
+    output wire [9:0]  pc_val,
+    output wire        h2t_v,
+    output wire [15:0] h2t_word,
+    output wire        t2h_pop,
+    output wire        step_v,
+    output wire [1:0]  step_t,
     output wire [1:0]  reg_t,
     output wire [3:0]  reg_r,
 
@@ -142,11 +144,8 @@ module tempo_host (
     if (!rst_n) begin
       cs_active <= 1'b0; sck_prev <= 1'b0; bitcnt <= 3'd0; sh_in <= 8'd0; mo <= 8'd0; idx <= 8'd0;
       cmd <= 8'd0; hi <= 8'd0; addr <= 10'd0; thread <= 2'd0; rreg <= 4'd0; word <= 16'd0;
-      ctl_v <= 1'b0; ctl <= 8'd0; pc_v <= 1'b0; pc_t <= 2'd0; pc_val <= 10'd0; h2t_v <= 1'b0; h2t_word <= 16'd0;
-      t2h_pop <= 1'b0; step_v <= 1'b0; step_t <= 2'd0;
       wr_pend <= 1'b0; wr_addr <= 10'd0; wr_data <= 16'd0; rd_pend <= 1'b0; rd_addr <= 10'd0;
     end else begin
-      ctl_v <= 1'b0; pc_v <= 1'b0; h2t_v <= 1'b0; t2h_pop <= 1'b0; step_v <= 1'b0;
       if (wr_done) wr_pend <= 1'b0;
       if (rd_done) rd_pend <= 1'b0;
       sck_prev <= sck;
@@ -165,11 +164,6 @@ module tempo_host (
             idx <= (cs_active ? idx : 8'd0) == 8'd255 ? 8'd255 : (cs_active ? idx : 8'd0) + 8'd1;
             if (!cs_active || idx == 8'd0) cmd <= b;
             hi <= n_hi; addr <= n_addr; thread <= n_thread; rreg <= n_rreg; word <= n_word;
-            if (n_ctl_v) begin ctl_v <= 1'b1; ctl <= b; end
-            if (n_pc_v) begin pc_v <= 1'b1; pc_t <= thread; pc_val <= {hi[1:0], b}; end
-            if (n_h2t_v) begin h2t_v <= 1'b1; h2t_word <= {hi, b}; end
-            if (n_pop) t2h_pop <= 1'b1;
-            if (n_step_v) begin step_v <= 1'b1; step_t <= b[1:0]; end
             if (n_wr) begin wr_pend <= 1'b1; wr_addr <= addr; wr_data <= {hi, b}; end
             if (n_rd) begin rd_pend <= 1'b1; rd_addr <= n_rd_addr; end
           end else if (cs_active) begin
@@ -184,5 +178,15 @@ module tempo_host (
     end
   end
 
-  wire _unused = &{byte_done, 1'b0};
+
+  assign ctl_v    = byte_done && n_ctl_v;
+  assign ctl      = b;
+  assign pc_v     = byte_done && n_pc_v;
+  assign pc_t     = thread;
+  assign pc_val   = {hi[1:0], b};
+  assign h2t_v    = byte_done && n_h2t_v;
+  assign h2t_word = {hi, b};
+  assign t2h_pop  = byte_done && n_pop;
+  assign step_v   = byte_done && n_step_v;
+  assign step_t   = b[1:0];
 endmodule

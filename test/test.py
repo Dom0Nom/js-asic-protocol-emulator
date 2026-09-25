@@ -1,40 +1,89 @@
-# SPDX-FileCopyrightText: © 2024 Tiny Tapeout
 # SPDX-License-Identifier: Apache-2.0
+"""RTL tests: every test runs the RTL in lockstep with the cycle-level model
+(test/lockstep.py) and checks the wire with an independent protocol model."""
 
 import cocotb
-from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles
+
+from lockstep import Lockstep
+from tempo.models.uart import UartRx
+from tempo.models.spi import SpiFlashLike
+from tempo.models.i2c import I2cTarget
+
+TX_SRC = """
+        .include "tempo.inc"
+        .equ PER, 16
+        .equ FRACV, 171                ; 50 MHz / 3 Mbaud = 16.67 cycles
+        .entry 0, main
+main:   lc   r1, (NOPIN << 12) | (NOPIN << 8) | (NOPIN << 4) | UO0
+        lw   l0, pins, r1
+        lc   r1, PER
+        lw   l0, len0, r1
+        lw   l0, len1, r1
+        lc   r1, FRACV
+        lw   l0, frac, r1
+        lc   r1, SYM_NRZ1
+        lw   l0, sym1, r1
+        li   r1, E_D | E_DEN
+        emit l0, r1
+        lc   r3, 0x0200
+loop:   hget r4
+        shli r4, r4, 1
+        or   r4, r4, r3
+        tx   l0, r4, 10
+        bra  loop
+"""
 
 
 @cocotb.test()
-async def test_project(dut):
-    dut._log.info("Start")
+async def test_host_boot_and_uart_tx(dut):
+    ls = Lockstep(dut, TX_SRC)
+    await ls.start()
+    await ls.boot()
+    await ls.run(100)  # firmware sets the line idle; uo0 is low from reset until then
+    rx = ls.attach(UartRx("uo0", 3_000_000))
+    data = [0x55, 0x00, 0xFF, 0xA5, 0x3C]
+    ls.h.host.mbox_write(data)
+    await ls.boot()
+    await ls.run(17 * 10 * (len(data) + 1))
+    assert rx.bytes == data, rx.bytes
+    assert not rx.errors
+    dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")
 
-    # Set the clock period to 10 us (100 KHz)
-    clock = Clock(dut.clk, 10, unit="us")
-    cocotb.start_soon(clock.start())
 
-    # Reset
-    dut._log.info("Reset")
-    dut.ena.value = 1
-    dut.ui_in.value = 0
-    dut.uio_in.value = 0
-    dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 10)
-    dut.rst_n.value = 1
+@cocotb.test()
+async def test_spi_mode3_flash_read(dut):
+    ls = Lockstep(dut, '.equ SPI_MODE, 3\n.equ SPI_PER, 10\n.include "spi_master.s"\n')
+    await ls.start()
+    await ls.boot()
+    flash = ls.attach(SpiFlashLike("uio2", "uio0", "uio1", "uio3", mode=3,
+                                   mem=bytearray(range(256)), min_setup_cycles=2, min_hold_cycles=2))
+    END = 0x8000
+    ls.h.host.mbox_write([0x03, 0x00, 0x00])
+    ls.h.host.mbox_write([0x20, 0, END | 0])
+    await ls.boot()
+    await ls.run(600)
+    got = ls.h.host.mbox_read(6)  # cmd, 3 address bytes, 2 data bytes
+    await ls.boot()
+    assert got.words(2)[4:6] == [0x20, 0x21], got.words(2)
+    assert not flash.violations
 
-    dut._log.info("Test project behavior")
 
-    # Set the input values you want to test
-    dut.ui_in.value = 20
-    dut.uio_in.value = 30
-
-    # Wait for one clock cycle to see the output values
-    await ClockCycles(dut.clk, 1)
-
-    # The following assersion is just an example of how to check the output values.
-    # Change it to match the actual expected output of your module:
-    assert dut.uo_out.value == 50
-
-    # Keep testing the module by changing the input values, waiting for
-    # one or more clock cycles, and asserting the expected output values.
+@cocotb.test()
+async def test_i2c_write_read_with_stretching(dut):
+    ls = Lockstep(dut, '.equ I2C_SLOT, 125\n.include "i2c_master.s"\n', pullups={"uio4", "uio5"})
+    await ls.start()
+    tgt = ls.attach(I2cTarget("uio5", "uio4", 0x50, mode="fast", stretch_cycles=40))
+    await ls.boot()
+    START, STOP, WR, RDN = 1, 2, 3, 5
+    cmds = [(START, 0), (WR, 0xA0), (WR, 0x10), (WR, 0x5A), (START, 0), (WR, 0xA0), (WR, 0x10),
+            (START, 0), (WR, 0xA1), (RDN, 0), (STOP, 0)]
+    ls.h.host.mbox_write([c << 8 | d for c, d in cmds[:4]])
+    ls.h.host.mbox_write([c << 8 | d for c, d in cmds[4:8]])
+    ls.h.host.mbox_write([c << 8 | d for c, d in cmds[8:]])
+    await ls.boot()
+    await ls.run(8000)
+    rep = ls.h.host.mbox_read(4)
+    await ls.boot()
+    assert rep.words(2)[:4] == [0, 0, 0, 0]
+    assert tgt.regs[0x10] == 0x5A
+    assert not tgt.violations, tgt.violations[:4]
