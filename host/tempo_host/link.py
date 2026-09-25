@@ -197,6 +197,24 @@ class Link:
         if start:
             self.control(run_set=threads)
 
+    def patch(self, params):
+        """Change parameters of the loaded image and restart its threads
+        from their entry points, without reloading the code."""
+        image = self.image
+        threads = 0
+        for t in image["entry"]:
+            threads |= 1 << t
+        self.halt(threads)
+        for name, value in params.items():
+            a = image["params"][name]
+            self.write_imem(a, [value & 0xFFFF])
+            self.param_values[name] = value & 0xFFFF
+        while self.get_some():
+            pass
+        for t, pc in image["entry"].items():
+            self.set_pc(t, pc)
+        self.control(run_set=threads)
+
     def check(self, allow=()):
         """Raise if the chip reports any error flag not in allow. Lane flags
         stay set until firmware clears them (`stat`)."""

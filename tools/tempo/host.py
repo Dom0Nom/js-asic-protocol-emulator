@@ -34,6 +34,7 @@ class HostPort:
         self.rd_pend = None  # addr
         self.rdata = 0
         self.rcnt = 0  # words a mailbox read may still pop, or a write may still push
+        self.peeked = False  # mailbox read: the head word is being shifted out
         self.ops = []  # applied after the thread executes (pre-edge reads)
 
     @property
@@ -124,6 +125,7 @@ class HostPort:
                 # the byte after the command carries the T2H level; the read
                 # pops at most that many words
                 self.rcnt = len(ch.t2h)
+                self.peeked = False
                 return self.rcnt | self.error() << 7
             if b == 0x08:
                 # ... and for a write, the free H2T space; the write pushes at
@@ -192,12 +194,18 @@ class HostPort:
                 self.ops.append(("h2t", (self.hi << 8) | b))
             return 0
         if c == 0x09:
+            # Peek at the head when the byte before its high byte completes
+            # (MISO must be loaded then); pop only once the high byte has
+            # been clocked out, so a host that stops after n words loses
+            # nothing.
             if i % 2 == 1:
-                self.word = ch.t2h[0] if self.rcnt else 0
-                if self.rcnt:
-                    self.rcnt -= 1
-                    self.ops.append(("t2h_pop",))
+                self.peeked = self.rcnt > 0
+                self.word = ch.t2h[0] if self.peeked else 0
                 return self.word >> 8
+            if self.peeked:
+                self.peeked = False
+                self.rcnt -= 1
+                self.ops.append(("t2h_pop",))
             return self.word & 0xFF
         if c == 0x0A:
             if i == 1:

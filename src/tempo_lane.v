@@ -345,7 +345,7 @@ module tempo_lane #(
             if (cur_kind == K_RX && rcount_n >= cur_n && !destuff_n) begin
               rx_push = 1'b1; rxp_word = rword_n; rxp_count = rcount_n; rxp_err = rerr_n;
               rword_n = 16'd0; rcount_n = 5'd0; rerr_n = 1'b0;
-              if (cont_q && !xrx) begin
+              if ((cont_q || cfg[3]) && !xrx) begin  // CEN: keep the clock pulse whole
                 rx_complete_n = 1'b1;  // stay on the bit grid until the slot ends
               end else begin
                 fin = 1'b1;

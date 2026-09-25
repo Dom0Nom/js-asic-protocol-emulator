@@ -10,10 +10,14 @@ from tempo.transport import cocotb_call, cocotb_transport
 
 from tempo.models.spi import SpiNorFlash
 from tempo.models.uart import UartRx, UartTx
+from tempo.models.swd import SwdTarget
+from tempo.models.jtag import JtagChain, Tap
 from tempo_host.link import Link
 from tempo_host import i2c as i2c_mod
 from tempo_host import spi as spi_mod
 from tempo_host import uart as uart_mod
+from tempo_host import swd as swd_mod
+from tempo_host import jtag as jtag_mod
 
 
 async def setup(dut, pullups=()):
@@ -117,4 +121,51 @@ async def test_uc1_uart_autobaud_console(dut):
     assert baud == 115200, baud
     assert prompt == b"ok>", prompt
     assert bytes(target_rx.bytes) == b"help\r" and not target_rx.errors, target_rx.errors
+    dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")
+
+
+@cocotb.test()
+async def test_uc5_swd_attach(dut):
+    """Use case 5: JTAG-to-SWD, DPIDR, debug power-up, MEM-AP IDR and ROM
+    table, with WAIT responses along the way."""
+    ls, link = await setup(dut, pullups={"uio0"})
+    tgt = ls.attach(SwdTarget("uio1", "uio0", wait_count=2, pwrup_delay=100))
+
+    def host():
+        p = swd_mod.Swd(link, swdio=0, swclk=1, period=10)
+        dp = p.connect(from_jtag=True)
+        p.power_up()
+        return dp, p.rom_table(), p.waits
+
+    dp, rom, waits = await cocotb_call(host)
+    assert dp["dpidr"] == 0x2BA01477 and dp["designer"] == "Arm", dp
+    assert rom["idr"] == 0x24770011 and rom["base"] == 0xE00FF000 and rom["rom_cid_ok"], rom
+    assert [e["address"] for e in rom["entries"]] == [0xE000E000, 0xE0001000], rom
+    assert waits == 2
+    assert not tgt.violations and not ls.board.contention
+    dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")
+
+
+@cocotb.test()
+async def test_uc4_jtag_chain_and_pin_finder(dut):
+    """Use case 4: IDCODE chain scan with JEP106 decode, BYPASS chain
+    length, then identify an unlabelled header's pins."""
+    ls, link = await setup(dut, pullups={"uio2", "uio7"})
+    arm, xil = 0x4BA00477, 0x0362D093
+    chain = ls.attach(JtagChain("uio0", "uio1", "uio2", "uio3", [Tap(4, arm), Tap(5, None), Tap(6, xil)]))
+    # a second board on other pins, header unlabelled: TCK=uio5 TMS=uio6 TDI=uio7 TDO=uio4
+    ls.attach(JtagChain("uio5", "uio6", "uio7", "uio4", [Tap(4, arm)]))
+
+    def host():
+        j = jtag_mod.Jtag(link, tck=0, tms=1, tdi=2, tdo=3, period=10)
+        ids = j.idcodes()
+        n = j.chain_length()
+        found = jtag_mod.find_pins(link, candidates=(4, 5, 6, 7), period=10)
+        link.check()
+        return ids, n, found
+
+    ids, n, found = await cocotb_call(host)
+    assert ids == [xil, None, arm], ids
+    assert n == 3
+    assert found == {"tck": 5, "tms": 6, "tdi": 7, "tdo": 4, "idcode": arm}, found
     dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")

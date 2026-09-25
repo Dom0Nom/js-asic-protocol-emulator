@@ -434,7 +434,9 @@ class Lane:
         cmd = self.cur
         if cmd.kind == "rx" and self.rcount >= cmd.n and not self.destuff:
             self.push_rx(end=0)
-            if self.continuation_queued() and not self.xclk:
+            # a clocked receive (CEN) or one with a queued continuation runs
+            # to the end of its slot, so the clock pulse and the bit grid stay whole
+            if (self.continuation_queued() or self.cfg(C_CEN)) and not self.xclk:
                 # stay on the bit grid: run to the end of this slot
                 self.rx_complete = True
                 return False
