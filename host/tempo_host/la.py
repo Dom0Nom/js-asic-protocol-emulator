@@ -109,7 +109,7 @@ class LogicAnalyser:
             reply = self.link.get(5, timeout_us)
         except TempoError:
             self.stop()
-            reply = self.link.get(5, 200000)
+            reply = self.link.get(5, 20000)  # recorders stop within 4096 cycles
         counts = [c & 0x7FFF for c in reply[:3]]
         header, start = reply[3] | sum(((c >> 15) & 1) << (4 + k) for k, c in enumerate(reply[:3])), reply[4]
         buf = self.link.param_values["buf"]

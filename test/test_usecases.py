@@ -12,12 +12,15 @@ from tempo.models.spi import SpiNorFlash
 from tempo.models.uart import UartRx, UartTx
 from tempo.models.swd import SwdTarget
 from tempo.models.jtag import JtagChain, Tap
+from tempo.models.siggen import Pulses, Square
 from tempo_host.link import Link
 from tempo_host import i2c as i2c_mod
 from tempo_host import spi as spi_mod
 from tempo_host import uart as uart_mod
 from tempo_host import swd as swd_mod
 from tempo_host import jtag as jtag_mod
+from tempo_host.la import LogicAnalyser
+from tempo_host.trigger import PulseTrigger
 
 
 async def setup(dut, pullups=()):
@@ -168,4 +171,75 @@ async def test_uc4_jtag_chain_and_pin_finder(dut):
     assert ids == [xil, None, arm], ids
     assert n == 3
     assert found == {"tck": 5, "tms": 6, "tdi": 7, "tdo": 4, "idcode": arm}, found
+    dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")
+
+
+@cocotb.test()
+async def test_uc8_logic_analyser(dut):
+    """Use case 8: three channels captured into SRAM with cycle-exact
+    timestamps, a trigger, frequency and duty measurement, VCD export."""
+    import io
+    ls, link = await setup(dut)
+    ls.attach(Square("uio0", high=150, low=350, start=0))
+    ls.attach(Square("uio1", high=80, low=80, start=5))
+    ls.attach(Pulses("uio2", [110000, 110020, 140000, 140007]))
+    ls.attach(Pulses("uio3", [100000], level=1))  # trigger: falls at 100000, after arming
+
+    def host():
+        la = LogicAnalyser(link, pins=(0, 1, 2), names=["a", "b", "c"], trigger=(3, "fall"), n=120)
+        cap = la.capture(timeout_us=3000)
+        vcd = io.StringIO()
+        cap.to_vcd(vcd)
+        return cap, vcd.getvalue()
+
+    cap, vcd = await cocotb_call(host)
+    a, b = cap.edges[0], cap.edges[1]
+    assert not cap.overruns
+    assert all(y[0] - x[0] == (150 if x[1] else 350) for x, y in zip(a, a[1:])), a[:6]
+    assert all(y[0] - x[0] == 80 for x, y in zip(b, b[1:])), b[:6]
+    assert [y[0] - x[0] for x, y in zip(cap.edges[2], cap.edges[2][1:])] == [20, 29980, 7]
+    m = cap.measure(0)
+    assert abs(m["frequency_hz"] - 100000) < 1 and abs(m["duty"] - 0.3) < 0.01
+    assert "$var wire 1 ! a $end" in vcd
+    dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")
+
+
+class EdgeLog:
+    def __init__(self, net):
+        self.net, self.prev, self.edges = net, None, []
+
+    def step(self, cycle, nets):
+        v = nets.get(self.net, 0)
+        if self.prev is not None and v != self.prev:
+            self.edges.append((cycle, v))
+        self.prev = v
+        return {}
+
+
+@cocotb.test()
+async def test_uc9_triggered_pulse(dut):
+    """Use case 9: a pulse at an exact delay after the start bit of a
+    matching UART byte; the offset is the same for every trigger."""
+    ls, link = await setup(dut, pullups={"uio1"})
+    tx = ls.attach(UartTx("uio1", 1000000))
+    tlog = ls.attach(EdgeLog("uio1"))
+    out = ls.attach(EdgeLog("uio0"))
+
+    def host():
+        t = PulseTrigger(link, out=0, trig=1, delay=1500, width=40, kind="uart", baud=1000000, match=0x5A)
+        link.t.sleep_us(20)
+        tx.send(b"\x00\x5a\x33\x5a", gap_bits=1)
+        return t.wait(2, timeout_us=400)
+
+    assert await cocotb_call(host) == 2
+    await ls.run(2000)
+    falls = [c for c, v in tlog.edges if v == 0]
+    starts = [falls[0]]  # frame starts: the first fall after each 11-bit frame
+    for c in falls:
+        if c >= starts[-1] + 10 * 50:
+            starts.append(c)
+    rises = [c for c, v in out.edges if v == 1]
+    offs = [r - starts[i] for r, i in zip(rises, (1, 3))]
+    assert offs == [1504, 1504], (offs, starts, rises)  # delay + 4 cycles of pipeline, every time
+    assert [b - a for (a, va), (b, vb) in zip(out.edges, out.edges[1:]) if va == 1] == [40, 40]
     dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")

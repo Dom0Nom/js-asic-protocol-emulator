@@ -540,3 +540,91 @@ class StuckSda:
             self.left -= 1
         self._prev = s
         return {self.sda: 0} if self.left else {}
+
+
+class I2cMaster:
+    """Bit-level I2C controller for monitor and target-emulation tests.
+
+    `run(ops)` queues operations: ('start',), ('stop',), ('write', byte),
+    ('read', ack) where ack is True to ACK the byte. Open drain on SCL and
+    SDA; honours clock stretching (waits while SCL is held low). `half` is
+    half an SCL period in cycles (125 for 100 kHz... at 50 MHz: 250).
+    Results: `acks` for writes (0 ACK, 1 NACK), `reads` for reads.
+    """
+
+    def __init__(self, scl, sda, half=63):
+        self.scl, self.sda, self.half = scl, sda, half
+        self.q = []
+        self.acks, self.reads = [], []
+        self.lv = {scl: None, sda: None}  # None = released
+        self.gen = None
+        self._nets = [{}]  # current net levels, read by the running sequence
+
+    def run(self, ops):
+        self.q.extend(ops)
+
+    @property
+    def busy(self):
+        return bool(self.q) or self.gen is not None
+
+    def _seq(self, op, nets):
+        h = self.half
+        scl, sda = self.scl, self.sda
+
+        def wait(n):
+            for _ in range(n):
+                yield
+
+        def scl_high():
+            self.lv[scl] = None
+            yield
+            while nets_ref[0].get(scl, 1) == 0:  # stretched
+                yield
+        nets_ref = self._nets
+        if op[0] == 'start':
+            self.lv[sda] = None
+            yield from wait(2)
+            yield from scl_high()
+            yield from wait(h)
+            self.lv[sda] = 0
+            yield from wait(h)
+            self.lv[scl] = 0
+            yield from wait(h // 2)
+        elif op[0] == 'stop':
+            self.lv[sda] = 0
+            yield from wait(h // 2)
+            yield from scl_high()
+            yield from wait(h)
+            self.lv[sda] = None
+            yield from wait(2 * h)
+        else:
+            byte = op[1] if op[0] == 'write' else 0xFF
+            bits = [(byte >> (7 - i)) & 1 for i in range(8)]
+            bits.append(1 if op[0] == 'write' else (0 if op[1] else 1))
+            got = 0
+            for i, b in enumerate(bits):
+                self.lv[sda] = None if b else 0
+                yield from wait(h // 2)
+                yield from scl_high()
+                yield from wait(h // 2)
+                s = nets_ref[0].get(sda, 1)
+                got = (got << 1) | s
+                yield from wait(h - h // 2)
+                self.lv[scl] = 0
+                yield from wait(h // 2)
+            self.lv[sda] = None
+            if op[0] == 'write':
+                self.acks.append(got & 1)
+            else:
+                self.reads.append(got >> 1)
+
+    def step(self, cycle, nets):
+        self._nets[0] = nets
+        if self.gen is None and self.q:
+            self.gen = self._seq(self.q.pop(0), nets)
+        if self.gen is not None:
+            try:
+                next(self.gen)
+            except StopIteration:
+                self.gen = None
+        return {k: (0 if v == 0 else None) for k, v in self.lv.items()}

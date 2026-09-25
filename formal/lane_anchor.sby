@@ -1,0 +1,22 @@
+[tasks]
+bmc
+cover
+
+[options]
+bmc: mode bmc
+bmc: depth 40
+cover: mode cover
+cover: depth 40
+multiclock off
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+read_verilog -formal -I../src tempo_lane.v
+read_verilog -formal -sv lane_anchor.sv
+prep -top lane_anchor
+
+[files]
+../src/tempo_lane.v
+lane_anchor.sv
