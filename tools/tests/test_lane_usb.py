@@ -72,3 +72,4 @@ def test_usb_rx_token_and_data_with_clock_error():
             assert dat[:2 + len(data)] == [0x80, pid_byte("DATA0")] + data, (err, dat)
             assert end2 & 0x100, (err, hex(end2))  # CRC16 residual ok
             assert h.chip.lanes[1].stat & ~((1 << 3) | (1 << 4)) == 0  # only pattern events
+            assert not h.board.contention

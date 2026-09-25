@@ -112,3 +112,4 @@ async def test_usb_ls_rx_and_tx(dut):
     await ls.run(34 * 30)
     assert [p.pid for p in rx.packets][-1] == "ACK", (rx.packets, rx.errors)
     assert not rx.errors
+    assert not ls.board.contention, ls.board.contention[:4]

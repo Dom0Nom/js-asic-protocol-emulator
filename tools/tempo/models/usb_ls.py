@@ -423,5 +423,9 @@ class UsbLsTransmitter:
                 self._active = False
                 self._cur_symbol = 'J'
 
+        if not self._active:
+            # between packets the transmitter releases the bus; idle J comes
+            # from the pull-up on D- (low speed) and the pull-down on D+
+            return {self.dp: None, self.dm: None}
         dp, dm = _SYMBOL_PINS[self._cur_symbol]
         return {self.dp: dp, self.dm: dm}
