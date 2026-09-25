@@ -24,9 +24,17 @@ class Mismatch(AssertionError):
 
 
 class Lockstep:
-    def __init__(self, dut, src, pullups=(), threads=None, gl=False):
+    def __init__(self, dut, src, pullups=(), threads=None, gl=False, boot="host"):
+        """boot="host": load and start through the host SPI port (both sides).
+        boot="backdoor": preload the SRAM and PCs and set the run bits in
+        the first cycle on both sides (fast, for random tests)."""
         self.dut = dut
-        self.h = Harness(src, pullups=pullups, threads=threads, boot="host")
+        self.boot_mode = boot
+        self.threads = threads
+        self.h = Harness(src, pullups=pullups, threads=threads, boot=boot)
+        if boot == "backdoor":
+            for t in self.h.chip.threads:
+                t.run = False  # started together with the RTL in start()
         self.chip = self.h.chip
         self.board = self.h.board
         self.gl = gl or os.environ.get("GATES") == "yes"
@@ -48,6 +56,22 @@ class Lockstep:
         await ClockCycles(d.clk, 5)
         await FallingEdge(d.clk)
         d.rst_n.value = 1  # this falling edge starts model cycle 0
+        if not self.gl:
+            # Real SRAM powers up random; the model assumes 0. Firmware must
+            # only read words it loaded, and the bench zero-fills both sides.
+            mem = d.user_project.imem.i_SRAM_1P_behavioral_bm_bist.memory
+            for a in range(1024):
+                mem[a].value = self.h.prog.words[a] if self.boot_mode == "backdoor" else 0
+        if self.boot_mode == "backdoor":
+            core = d.user_project.core
+            run = 0  # noqa
+            for t, pc in sorted(self.h.prog.entries.items()):
+                if self.threads is None or t in self.threads:
+                    core.pc[t].value = pc
+                    self.chip.threads[t].pc = pc
+                    self.chip.threads[t].run = True
+                    run |= 1 << t
+            core.run.value = run
 
     def pads_in(self):
         nets = self.board.nets

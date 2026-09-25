@@ -37,9 +37,42 @@
   "//": "!!! DO NOT CHANGE ANYTHING BELOW THIS POINT !!!",
   "//": "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
 
+  "//": "SRAM macro (instruction memory). Power: Project.ExtendPowerStripes (librelane_plugin_sram_pdn.py) redraws the Metal4 stripes over the macro supply columns after GeneratePDN, because the single-layer TT grid cannot reach them.",
+  "meta": { "flow": "Classic", "substituting_steps": { "+OpenROAD.GeneratePDN": "Project.ExtendPowerStripes" } },
+  "MACROS": {
+    "RM_IHPSG13_1P_1024x16_c2_bm_bist": {
+      "gds": ["pdk_dir::libs.ref/sg13cmos5l_sram/gds/RM_IHPSG13_1P_1024x16_c2_bm_bist.gds"],
+      "lef": ["pdk_dir::libs.ref/sg13cmos5l_sram/lef/RM_IHPSG13_1P_1024x16_c2_bm_bist.lef"],
+      "vh": ["dir::macros/RM_IHPSG13_1P_1024x16_c2_bm_bist.bb.v"],
+      "nl": ["dir::macros/RM_IHPSG13_1P_1024x16_c2_bm_bist.bb.v"],
+      "spice": ["pdk_dir::libs.ref/sg13cmos5l_sram/cdl/RM_IHPSG13_1P_1024x16_c2_bm_bist.cdl"],
+      "lib": {
+        "nom_*": ["pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_1024x16_c2_bm_bist_typ_1p20V_25C.lib"],
+        "min_*": ["pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_1024x16_c2_bm_bist_fast_1p32V_m55C.lib"],
+        "max_*": ["pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_1024x16_c2_bm_bist_slow_1p08V_125C.lib"]
+      },
+      "instances": { "imem": { "location": [42, 81], "orientation": "R0" } }
+    }
+  },
+  "PDN_MACRO_CONNECTIONS": ["imem VPWR VGND VDD! VSS!", "imem VPWR VGND VDDARRAY! VSS!"],
+  "PDN_CFG": "dir::pdn_cfg.tcl",
+  "//": "pdngen checks connectivity before ExtendPowerStripes runs; LVS is the real check",
+  "ERROR_ON_PDN_VIOLATIONS": 0,
+  "FP_MACRO_HORIZONTAL_HALO": 1,
+  "FP_MACRO_VERTICAL_HALO": 0,
+  "PDN_HORIZONTAL_HALO": 1,
+  "PDN_VERTICAL_HALO": 0,
+  "GRT_MACRO_EXTENSION": 2,
+  "MAGIC_MACRO_STD_CELL_SOURCE": "PDK",
+  "MAGIC_EXT_ABSTRACT_CELLS": ["RM_IHPSG13_.*"],
+  "//": "Magic DRC sees false overlaps on the macro LEF abstract; KLayout DRC and LVS are signoff",
+  "ERROR_ON_MAGIC_DRC": false,
+  "RUN_MAGIC_DRC": false,
+  "ERROR_ON_ILLEGAL_OVERLAPS": 0,
+
   "//": "Save some time",
   "RUN_KLAYOUT_XOR": 0,
-  "RUN_KLAYOUT_DRC": 0,
+  "RUN_KLAYOUT_DRC": 1,
 
   "//": "Don't put clock buffers on the outputs",
   "DESIGN_REPAIR_BUFFER_OUTPUT_PORTS": 0,
@@ -69,6 +102,7 @@
 
   "//": "MAGIC_DEF_LABELS may cause issues with LVS",
   "MAGIC_DEF_LABELS": 0,
+  "MAGIC_MACRO_STD_CELL_SOURCE": "PDK",
 
   "//": "Only export pin area in LEF (without any connected nets)",
   "MAGIC_WRITE_LEF_PINONLY": 1
