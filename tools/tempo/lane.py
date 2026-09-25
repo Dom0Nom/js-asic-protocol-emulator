@@ -460,7 +460,10 @@ class Lane:
         if cmd.kind == "emit":
             self.run = 0
             self.stuff_pending = False
-        elif bit(self.regs[MODE], 3) and not any(q.kind in ("tx", "rx", "emit") for q in self.queue):
+        # FRAME: running dry inside a frame is flagged; only an emit with bit 7
+        # (end of frame) may leave the queue empty.
+        eof = cmd.kind == "emit" and bit(cmd.data, 7)
+        if bit(self.regs[MODE], 3) and not eof and not any(q.kind in ("tx", "rx", "emit") for q in self.queue):
             self.stat |= 1 << S_UNDER
         # One queued lw/start at a command boundary costs no time.
         if self.queue and self.queue[0].kind in ("lw", "start"):

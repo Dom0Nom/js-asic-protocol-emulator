@@ -40,9 +40,10 @@ module lane_miter (input wire clk);
     // entry 0 turns FRAME on, entry 1 anchors the frame, the last entry ends it
     assume(`KIND(0) == 3'd3 && `RG(0) == 4'd15 && `DATA(0) == 16'h0008);
     assume(`KIND(1) == 3'd4 && `DATA(1) >= 16'd4 && `DATA(1) <= 16'd24);
-    assume(`KIND(N-1) == 3'd2);
+    assume(`KIND(N-1) == 3'd2 && data_v[(N-1)*16 + 7]);   // end-of-frame emit
     for (i = 2; i < N - 1; i = i + 1) begin
       assume(`KIND(i) == 3'd0 || `KIND(i) == 3'd2 || `KIND(i) == 3'd3);  // tx, emit, lw
+      if (`KIND(i) == 3'd2) assume(!data_v[i*16 + 7]);    // mid-frame emits
       assume(`NB(i) >= 5'd1 && `NB(i) <= 5'd4);
       assume(`FL(i)[0] == 1'b0);                   // no echo receive
       if (`KIND(i) == 3'd3) begin
@@ -50,8 +51,8 @@ module lane_miter (input wire clk);
         assume(`RG(i) != 4'd1 && `RG(i) != 4'd14);  // pins fixed, CAP read-only
         if (`RG(i) == 4'd2 || `RG(i) == 4'd3) assume(`DATA(i) >= 16'd1 && `DATA(i) <= 16'd3);
         if (`RG(i) == 4'd7 || `RG(i) == 4'd8 || `RG(i) == 4'd9) assume(`DATA(i) <= 16'd3);
-        if (`RG(i) == 4'd4 || `RG(i) == 4'd5) assume(`DATA(i)[12:0] <= 13'd3);
-        if (`RG(i) == 4'd15) assume(`DATA(i)[2:0] == 3'd0 && `DATA(i)[3] && `DATA(i)[7] == 1'b0 && `DATA(i)[11:9] == 3'd0);
+        if (`RG(i) == 4'd4 || `RG(i) == 4'd5) assume(data_v[i*16 + 0 +: 13] <= 13'd3);
+        if (`RG(i) == 4'd15) assume(data_v[i*16 + 0 +: 3] == 3'd0 && data_v[i*16 + 3] && data_v[i*16 + 7] == 1'b0 && data_v[i*16 + 9 +: 3] == 3'd0);
       end
     end
   end
@@ -90,8 +91,8 @@ module lane_miter (input wire clk);
 
   reg started_a = 1'b0, started_b = 1'b0;
   always @(posedge clk) begin
-    if (runa) started_a <= 1'b1;
-    if (runb) started_b <= 1'b1;
+    if (rst_n && runa) started_a <= 1'b1;
+    if (rst_n && runb) started_b <= 1'b1;
   end
 
   wire bad_a = st_a[5] | st_a[6];  // LATE, UNDER

@@ -231,7 +231,7 @@ LANE sub-operations:
 | 6 | `stop L` | abort the running command (also while stretched), flush the queue and the RX FIFO, keep pin levels. |
 | 7 | `stat r, L` | `r = STAT`, then clear the sticky bits that were read as 1. |
 
-`emit` word: bit 0 D level, bit 1 A level, bit 2 C level, bit 4 D enable, bit 5 A enable, bit 6 C enable. Enable 0 releases the pin. On an open-drain role, level 1 also releases.
+`emit` word: bit 0 D level, bit 1 A level, bit 2 C level, bit 4 D enable, bit 5 A enable, bit 6 C enable, bit 7 end of frame. Enable 0 releases the pin. On an open-drain role, level 1 also releases.
 
 ### Lanes
 
@@ -270,7 +270,7 @@ Registers (`lr` reads the current value; `lw` goes through the command queue):
 - otherwise at the next start-pattern match if `AUTOSTART` is set and the command is a receive without `c`;
 - otherwise at once.
 
-Consecutive commands run back to back. If the queue is empty when a command ends and `FRAME` is set, `UNDER` is set, unless the command was an `emit` (an `emit` ends a frame).
+Consecutive commands run back to back. With `FRAME` set, a command that ends while no data command is queued sets `UNDER`, unless it is an `emit` with bit 7 set, which marks the end of a frame. So inside a frame every gap in the command stream is either anchored by `start`/`sync` or flagged, which is what the timing-independence theorem needs.
 
 **Slots.** A slot carrying data bit `b` lasts `LEN_b` time units, receive and `emit` slots last `LEN0`, plus one extra unit whenever the fractional accumulator (`acc += FRAC`, 8 bits) overflows. With `t` the offset in time units from slot start:
 

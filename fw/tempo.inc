@@ -41,6 +41,7 @@
 .equ E_DEN, 1 << 4
 .equ E_AEN, 1 << 5
 .equ E_CEN, 1 << 6
+.equ E_EOF, 1 << 7                  ; end of frame (FRAME mode)
 
 ; STAT bits
 .equ ST_BUSY, 1 << 0

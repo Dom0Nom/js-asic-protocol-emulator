@@ -408,7 +408,9 @@ module tempo_lane #(
       if (cur_kind == K_EMIT) begin
         run_n = 3'd0;
         stuff_pending_n = 1'b0;
-      end else if (mode[3] && !has_data) begin
+      end
+      // FRAME: only an emit with bit 7 (end of frame) may leave the queue empty
+      if (mode[3] && !has_data && !(cur_kind == K_EMIT && cur_data[7])) begin
         stat_n[3] = 1'b1;
       end
       if (q0_v && (q0_kind == K_LW || q0_kind == K_START)) want_cfg = 1'b1;
