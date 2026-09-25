@@ -105,6 +105,7 @@ class Lane:
         self.fcnt = [0, 0, 0, 0]
         self.prev4 = 0
         self.frozen_done = False
+        self.rx_complete = False
         self._m_start = 0
         self._prev_i = 0
         # deferred thread operations
@@ -177,7 +178,7 @@ class Lane:
             elif n in ("tx", "txcrc"):
                 cmd = Cmd("tx", regs[i.rs], i.imm, i.rt)
             elif n == "rxn":
-                cmd = Cmd("rx", 0, i.imm + 1)
+                cmd = Cmd("rx", 0, i.imm + 1, i.rd & 1)  # flag 1: continue the frame
             elif n == "emit":
                 cmd = Cmd("emit", regs[i.rd])
             elif n == "start":
@@ -242,6 +243,8 @@ class Lane:
             elif k == "stop":
                 self.cur = None
                 self.queue.clear()
+                self.rxfifo.clear()
+                self.rx_new = []
                 self.frozen = False
                 self.pending_start = None
         for entry in self.rx_new:
@@ -346,6 +349,11 @@ class Lane:
         rs = (self.regs[MODE] >> 5) & 3 if self.full else 0
         if rs and self.slot_sample and cmd.kind == "rx" and i_ != prev_i:
             if rs == 3 or (rs == 1 and i_) or (rs == 2 and not i_):
+                if self.rx_complete:
+                    # the edge starts the next bit: hand over to the queued continuation
+                    self.finish_cmd()
+                    if self.cur is None:
+                        return
                 off = self.edge_offset_cycles()
                 self.t, self.pre = off >> self.pre_bits, off & ((1 << self.pre_bits) - 1)
                 self.set_levels()
@@ -382,7 +390,7 @@ class Lane:
                     self.stat |= 1 << S_STUFFERR
                 self.rrun = 1 if self.cfg(C_STUFFANY) else int(x == 1)
                 self.rlast = x
-                return False
+                return self.check_rx_complete()
             if self.cfg(C_STUFFANY):
                 self.rrun = self.rrun + 1 if x == self.rlast else 1
             else:
@@ -397,11 +405,25 @@ class Lane:
         else:
             self.rword |= x << self.rcount
         self.rcount += 1
+        return self.check_rx_complete()
+
+    def check_rx_complete(self):
+        cmd = self.cur
         if cmd.kind == "rx" and self.rcount >= cmd.n and not self.destuff:
             self.push_rx(end=0)
+            if self.continuation_queued():
+                # stay on the bit grid: run to the end of this slot
+                self.rx_complete = True
+                return False
             self.finish_cmd()
             return True
         return False
+
+    def continuation_queued(self):
+        q = self.queue
+        if q and q[0].kind == "rx" and q[0].flags & 1:
+            return True
+        return len(q) >= 2 and q[0].kind in ("lw", "start") and q[1].kind == "rx" and q[1].flags & 1
 
     def push_rx(self, end):
         self.rx_new.append((self.rword, self.rcount, end, self.rerr))
@@ -425,7 +447,7 @@ class Lane:
             return
         if cmd.kind == "tx" and cmd.flags & 1:
             self.push_rx(end=0)
-        if cmd.kind == "rx" and self.cur is not None:
+        if cmd.kind == "rx" and self.cur is not None and not self.rx_complete:
             # receive keeps sampling until n bits are taken
             self.begin_slot("rx", self.regs[LEN0])
             return
@@ -473,7 +495,7 @@ class Lane:
             self.pending_start = None
             self.begin_cmd(self.queue.popleft())
             return
-        if head.kind == "rx" and self.cfg(C_AUTOSTART):
+        if head.kind == "rx" and self.cfg(C_AUTOSTART) and not head.flags & 1:
             if not self._m_start:
                 return
             self.begin_cmd(self.queue.popleft(), rline=self._prev_i)
@@ -485,6 +507,7 @@ class Lane:
 
     def begin_cmd(self, cmd, rline=None):
         self.cur = cmd
+        self.rx_complete = False
         self.arb_lost_cmd = False
         self.frozen_done = False
         if cmd.kind == "emit":
@@ -503,9 +526,12 @@ class Lane:
             self.begin_tx_slot()
         else:
             self.rword = self.rcount = self.rerr = 0
-            self.rline = self.filt_i_now() if rline is None else rline
-            self.rrun = 0
-            self.destuff = False
+            # A continuing receive keeps the decoder state (stuffing and NRZI
+            # span word boundaries); any other receive starts it fresh.
+            if not cmd.flags & 1:
+                self.rline = self.filt_i_now() if rline is None else rline
+                self.rrun = 0
+                self.destuff = False
             self.begin_slot("rx", self.regs[LEN0])
 
     def filt_i_now(self):

@@ -270,7 +270,10 @@ def encode_stmt(op, ops, pc, sym, prog, size=1) -> list:
     if op in ("emit", "start", "sync"):
         return [enc(op, lane=lane(ops[0]), rd=reg(ops[1]))]
     if op == "rxn":
-        return [enc(op, lane=lane(ops[0]), imm=E(ops[1]) - 1)]
+        cont = len(ops) > 2 and ops[2].strip().lower() == "c"
+        if len(ops) > 2 and not cont:
+            raise AsmError("rxn flag must be c")
+        return [enc(op, lane=lane(ops[0]), imm=E(ops[1]) - 1, rd=int(cont))]
     if op == "wait":
         c = ops[1].strip().lower()
         return [enc(op, lane=lane(ops[0]), imm=WAIT_CONDS[c] if c in WAIT_CONDS else E(c))]

@@ -193,7 +193,7 @@ def disasm_insn(i: Insn) -> str:
     if n in ("emit", "start", "sync"):
         return f"{n} {L}, r{i.rd}"
     if n == "rxn":
-        return f"rxn {L}, {i.imm + 1}"
+        return f"rxn {L}, {i.imm + 1}" + (", c" if i.rd & 1 else "")
     if n == "wait":
         return f"wait {L}, {i.imm}"
     return f"{n} {L}"

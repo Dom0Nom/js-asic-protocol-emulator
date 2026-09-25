@@ -93,7 +93,7 @@ module tempo_lane #(
   reg        slot_v, slot_sample;
   reg [4:0]  bits_left;
   reg [15:0] shift;
-  reg        tx_last, arb_lost_cmd;
+  reg        tx_last, arb_lost_cmd, rx_complete;
 
   reg        line, last_bit, stuff_pending;
   reg [2:0]  run;
@@ -143,7 +143,7 @@ module tempo_lane #(
   reg        slot_v_n, slot_sample_n;
   reg [4:0]  bits_left_n;
   reg [15:0] shift_n;
-  reg        tx_last_n, arb_lost_cmd_n;
+  reg        tx_last_n, arb_lost_cmd_n, rx_complete_n;
   reg        line_n, last_bit_n, stuff_pending_n;
   reg [2:0]  run_n;
   reg        rline_n, rlast_n, destuff_n, rerr_n;
@@ -202,6 +202,7 @@ module tempo_lane #(
   // command, next transmit bit, begin a slot, set pin levels) happens at most
   // once per cycle, so each appears once here, enabled by flags that follow
   // the model's control flow (tools/tempo/lane.py, Lane.clock).
+  reg        align_edge;
   reg        fin, sampled_end, want_cfg, want_try, start_cmd, start_auto, tx_slot, bslot, lv;
   reg [1:0]  bs_kind;
   reg [15:0] bs_len;
@@ -211,6 +212,9 @@ module tempo_lane #(
   reg [2:0]  h_flags;
   reg [3:0]  h_reg;
   reg        h_v, h_is_cfg, h_is_data;
+  // a continuing receive (possibly behind one lw/start) is queued
+  wire       cont_q = (q0_v && q0_kind == K_RX && q0_flags[0]) ||
+                      (q0_v && (q0_kind == K_LW || q0_kind == K_START) && q1_v && q1_kind == K_RX && q1_flags[0]);
 
   always @* begin
     cfg_n = cfg; pins_n = pins; len0_n = len0; len1_n = len1; sym0_n = sym0; sym1_n = sym1;
@@ -225,7 +229,7 @@ module tempo_lane #(
     cur_v_n = cur_v; cur_kind_n = cur_kind; cur_n_n = cur_n; cur_flags_n = cur_flags; cur_data_n = cur_data;
     t_n = t; slot_len_n = slot_len; pre_n = pre; acc_n = acc; frozen_n = frozen; frozen_done_n = frozen_done;
     slot_kind_n = slot_kind; slot_v_n = slot_v; slot_sample_n = slot_sample; bits_left_n = bits_left;
-    shift_n = shift; tx_last_n = tx_last; arb_lost_cmd_n = arb_lost_cmd;
+    shift_n = shift; tx_last_n = tx_last; arb_lost_cmd_n = arb_lost_cmd; rx_complete_n = rx_complete;
     line_n = line; last_bit_n = last_bit; stuff_pending_n = stuff_pending; run_n = run;
     rline_n = rline; rlast_n = rlast; destuff_n = destuff; rerr_n = rerr; rrun_n = rrun;
     rword_n = rword; rcount_n = rcount; prev_level_n = prev_level;
@@ -235,7 +239,7 @@ module tempo_lane #(
     sym = 16'd0; diff = 16'd0; crc_tmp = 16'd0; w = 16'd0; k = 5'd0; off = 8'd0;
     acc_sum = 9'd0; has_data = 1'b0; rrun_skip = 1'b0; x = 1'b0; lvl = 1'b0; cl = 1'b0; clk_rel = 1'b0;
     stuff = 3'd0; raw = 1'b0;
-    fin = 1'b0; sampled_end = 1'b0; want_cfg = 1'b0; want_try = 1'b0; start_cmd = 1'b0; start_auto = 1'b0;
+    fin = 1'b0; align_edge = 1'b0; sampled_end = 1'b0; want_cfg = 1'b0; want_try = 1'b0; start_cmd = 1'b0; start_auto = 1'b0;
     tx_slot = 1'b0; bslot = 1'b0; lv = 1'b0; bs_kind = SK_TX; bs_len = 16'd0;
     h_kind = 3'd0; h_data = 16'd0; h_n = 5'd0; h_flags = 3'd0; h_reg = 4'd0; h_v = 1'b0; h_is_cfg = 1'b0; h_is_data = 1'b0;
     off = 8'd3 + {5'd0, mode[11:9]};
@@ -329,11 +333,17 @@ module tempo_lane #(
             if (cfg[0]) rword_n = {rword[14:0], x};
             else rword_n = rword | ({15'd0, x} << rcount);
             rcount_n = rcount + 5'd1;
+          end
+          begin
             if (cur_kind == K_RX && rcount_n >= cur_n && !destuff_n) begin
               rx_push = 1'b1; rxp_word = rword_n; rxp_count = rcount_n; rxp_err = rerr_n;
               rword_n = 16'd0; rcount_n = 5'd0; rerr_n = 1'b0;
-              fin = 1'b1;
-              done = 1'b1;
+              if (cont_q) begin
+                rx_complete_n = 1'b1;  // stay on the bit grid until the slot ends
+              end else begin
+                fin = 1'b1;
+                done = 1'b1;
+              end
             end
           end
         end
@@ -346,9 +356,14 @@ module tempo_lane #(
       end
       if (!done && FULL && mode[6:5] != 2'd0 && slot_sample && cur_kind == K_RX && in_i != prev_i &&
           (mode[6:5] == 2'd3 || (mode[6:5] == 2'd1 && in_i) || (mode[6:5] == 2'd2 && !in_i))) begin
-        t_n = {9'd0, off >> mode[2:0]};
-        pre_n = off & ((8'd1 << mode[2:0]) - 8'd1);
-        lv = 1'b1;
+        if (rx_complete) begin
+          fin = 1'b1;          // the edge starts the next bit: hand over to the continuation
+          align_edge = 1'b1;
+        end else begin
+          t_n = {9'd0, off >> mode[2:0]};
+          pre_n = off & ((8'd1 << mode[2:0]) - 8'd1);
+          lv = 1'b1;
+        end
         done = 1'b1;
       end
       if (!done) begin
@@ -367,7 +382,7 @@ module tempo_lane #(
               rx_push = 1'b1; rxp_word = rword_n; rxp_count = rcount_n; rxp_err = rerr_n;
               rword_n = 16'd0; rcount_n = 5'd0; rerr_n = 1'b0;
             end
-            if (cur_kind == K_RX) begin
+            if (cur_kind == K_RX && !rx_complete) begin
               bslot = 1'b1; bs_kind = SK_RX; bs_len = len0;
             end else begin
               fin = 1'b1;
@@ -445,7 +460,7 @@ module tempo_lane #(
           pend_v_n = 1'b0;
           start_cmd = 1'b1;
         end
-      end else if (h_kind == K_RX && cfg_n[12]) begin
+      end else if (h_kind == K_RX && cfg_n[12] && !h_flags[0]) begin
         if (m_start) begin
           start_cmd = 1'b1;
           start_auto = 1'b1;
@@ -471,6 +486,7 @@ module tempo_lane #(
       cur_n_n = h_n;
       cur_flags_n = h_flags;
       arb_lost_cmd_n = 1'b0;
+      rx_complete_n = 1'b0;
       frozen_done_n = 1'b0;
       if (h_kind == K_EMIT) begin
         bslot = 1'b1; bs_kind = SK_EMIT; bs_len = len0_n;
@@ -484,9 +500,12 @@ module tempo_lane #(
         tx_slot = 1'b1;
       end else begin
         rword_n = 16'd0; rcount_n = 5'd0; rerr_n = 1'b0;
-        rline_n = start_auto ? prev_i : cur4[1];
-        rrun_n = 3'd0;
-        destuff_n = 1'b0;
+        // a continuing receive keeps the decoder state
+        if (!h_flags[0]) begin
+          rline_n = start_auto ? prev_i : cur4[1];
+          rrun_n = 3'd0;
+          destuff_n = 1'b0;
+        end
         bslot = 1'b1; bs_kind = SK_RX; bs_len = len0_n;
       end
     end
@@ -541,7 +560,7 @@ module tempo_lane #(
         if (w[6] || cfg_n[2]) owned_n[2] = 1'b1;
         line_n = w[0];
       end
-      if (start_auto) begin
+      if (start_auto || align_edge) begin
         t_n = {9'd0, off >> mode_n[2:0]};
         pre_n = off & ((8'd1 << mode_n[2:0]) - 8'd1);
       end
@@ -605,6 +624,7 @@ module tempo_lane #(
     end
     if (op_stop) begin
       cur_v_n = 1'b0; q0_v_n = 1'b0; q1_v_n = 1'b0; frozen_n = 1'b0; pend_v_n = 1'b0;
+      f0_v_n = 1'b0; f1_v_n = 1'b0; rx_push = 1'b0;
     end
     if (rx_push) begin
       if (f1_v_n) stat_n[5] = 1'b1;
@@ -627,6 +647,7 @@ module tempo_lane #(
       cur_v <= 0; cur_kind <= 0; cur_n <= 0; cur_flags <= 0; cur_data <= 0;
       t <= 0; slot_len <= 0; pre <= 0; acc <= 0; frozen <= 0; frozen_done <= 0;
       slot_kind <= 0; slot_v <= 0; slot_sample <= 0; bits_left <= 0; shift <= 0; tx_last <= 0; arb_lost_cmd <= 0;
+      rx_complete <= 0;
       line <= 1; last_bit <= 0; stuff_pending <= 0; run <= 0;
       rline <= 1; rlast <= 0; destuff <= 0; rerr <= 0; rrun <= 0; rword <= 0; rcount <= 0; prev_level <= 0;
       d <= 0; a <= 0; c <= 0; owned <= 0; filt <= 0; fcnt <= 0; prev4 <= 0;
@@ -643,7 +664,7 @@ module tempo_lane #(
       cur_v <= cur_v_n; cur_kind <= cur_kind_n; cur_n <= cur_n_n; cur_flags <= cur_flags_n; cur_data <= cur_data_n;
       t <= t_n; slot_len <= slot_len_n; pre <= pre_n; acc <= acc_n; frozen <= frozen_n; frozen_done <= frozen_done_n;
       slot_kind <= slot_kind_n; slot_v <= slot_v_n; slot_sample <= slot_sample_n; bits_left <= bits_left_n;
-      shift <= shift_n; tx_last <= tx_last_n; arb_lost_cmd <= arb_lost_cmd_n;
+      shift <= shift_n; tx_last <= tx_last_n; arb_lost_cmd <= arb_lost_cmd_n; rx_complete <= rx_complete_n;
       line <= line_n; last_bit <= last_bit_n; stuff_pending <= stuff_pending_n; run <= run_n;
       rline <= rline_n; rlast <= rlast_n; destuff <= destuff_n; rerr <= rerr_n; rrun <= rrun_n;
       rword <= rword_n; rcount <= rcount_n; prev_level <= prev_level_n;

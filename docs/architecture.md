@@ -223,12 +223,12 @@ LANE sub-operations:
 | sub | Mnemonic | Operation |
 |---|---|---|
 | 0 | `rx r, L` | pop the RX FIFO into `r`; `C` = entry cut short (END), `N` = entry error, `Z` from the word. Blocks while empty. |
-| 1 | `rxn L, n` | queue a receive of `n = imm + 1` bits (1..16). Blocks while the queue is full. |
+| 1 | `rxn L, n[, c]` | queue a receive of `n = imm + 1` bits (1..16). Blocks while the queue is full. `c` (bit 0 of the register field) continues the current frame: the receive does not wait for the start pattern and keeps the decoder state. |
 | 2 | `emit L, r` | queue one raw slot (length `LEN0`) driving the pins from `r`. Blocks while full. |
 | 3 | `start L, r` | queue a start time: the next command's first slot begins at cycle `r`. Blocks while full. |
 | 4 | `sync L, r` | like `start` with time `CAP + r`. |
 | 5 | `wait L, c` | block until condition `imm`: 0 queue empty and lane idle, 1 start-pattern event (consumed), 2 stop-pattern event (consumed), 3 RX FIFO not empty. |
-| 6 | `stop L` | abort the running command (also while stretched), flush the queue, keep pin levels. |
+| 6 | `stop L` | abort the running command (also while stretched), flush the queue and the RX FIFO, keep pin levels. |
 | 7 | `stat r, L` | `r = STAT`, then clear the sticky bits that were read as 1. |
 
 `emit` word: bit 0 D level, bit 1 A level, bit 2 C level, bit 4 D enable, bit 5 A enable, bit 6 C enable. Enable 0 releases the pin. On an open-drain role, level 1 also releases.
@@ -267,7 +267,7 @@ Registers (`lr` reads the current value; `lw` goes through the command queue):
 **Starting.** An idle lane begins the head command:
 
 - at the pending start time, if one is set (setting `LATE` and starting at once if that time is already past);
-- otherwise at the next start-pattern match if `AUTOSTART` is set and the command receives;
+- otherwise at the next start-pattern match if `AUTOSTART` is set and the command is a receive without `c`;
 - otherwise at once.
 
 Consecutive commands run back to back. If the queue is empty when a command ends and `FRAME` is set, `UNDER` is set, unless the command was an `emit` (an `emit` ends a frame).
@@ -277,11 +277,11 @@ Consecutive commands run back to back. If the queue is empty when a command ends
 - D: for a coded bit, level A of `SYM_b` while `t < split`, level B after. With REL, the levels are XORed with the NRZI line state (differential codes). `emit` drives raw levels for its slot. In receive slots D holds (or is released with `DREL`).
 - A: complement of D with `DIFF`; otherwise holds the last `emit` level.
 - C (if `CEN`): `CPOL xor (CR <= t < CF)`. With `STRETCH` and `COD`, when C is released (at `CR`, or at the start of an `emit` slot that releases it) the lane freezes `t` until the filtered C input reads 1.
-- At `t = SAMP` the lane samples I (receive commands and `tx x`). A receive command ends one cycle after its last sample.
+- At `t = SAMP` the lane samples I (receive commands and `tx x`). A receive command ends one cycle after its last sample, so a new start edge (a UART start bit from a slightly fast sender) is never missed; but if a continuing receive (`c`, possibly behind one `lw`/`start`) is already queued, it runs to the end of its slot instead, so the continuation stays on the bit grid.
 - `RESYNC` (full lanes): during a receive, an I edge of the chosen polarity sets `t` to the synchroniser plus filter latency, so the slot re-aligns to the actual edge. The fractional accumulator is not reset. There is no resynchronisation jump width limit, so CAN receive is best effort.
 - `ARB`: in a `tx x` slot where D was released and the sample reads 0 (outside the last bit), set `ARBLOST` and release D for the rest of the command.
 
-**Coding (full lanes).** Transmit, per data bit in order: CRC update if the command has `c`; stuffing (after `STUFF` equal bits, or ones unless `STUFFANY`, insert the complement without consuming data; the counter runs across commands until an `emit`; a stuff bit owed at the end of a command is sent before that command completes); NRZI (toggle the line state on 0); symbol. `txcrc` bits are stuffed but not fed into the CRC; with `CRCINV` they are inverted. The NRZI line state starts at the current D level, so an `emit` of J before a packet sets it. Receive reverses the order: NRZI decode (1 if the level did not change), destuff (drop the bit after `STUFF` equal bits; `STUFFERR` if it is not the complement), CRC, shift. An echo from `tx x` returns decoded, destuffed bits.
+**Coding (full lanes).** Transmit, per data bit in order: CRC update if the command has `c`; stuffing (after `STUFF` equal bits, or ones unless `STUFFANY`, insert the complement without consuming data; the counter runs across commands until an `emit`; a stuff bit owed at the end of a command is sent before that command completes); NRZI (toggle the line state on 0); symbol. `txcrc` bits are stuffed but not fed into the CRC; with `CRCINV` they are inverted. The NRZI line state starts at the current D level, so an `emit` of J before a packet sets it. Receive reverses the order: NRZI decode (1 if the level did not change), destuff (drop the bit after `STUFF` equal bits; `STUFFERR` if it is not the complement), CRC, shift. An echo from `tx x` returns decoded, destuffed bits. A receive queued with `c` keeps the decoder state (NRZI reference level, destuff counter), since stuffing and NRZI span word boundaries; any other receive initialises it, to the I level before the start edge (AUTOSTART) or the current I level.
 
 CRC step for bit `b`: LSB first, `crc = (crc >> 1) ^ (POLY if (crc ^ b) & 1)`; MSB first, `crc = (crc << 1) ^ (POLY if (crc >> 15) ^ b)`.
 

@@ -361,7 +361,7 @@ module tempo_core (
               else begin
                 ex_commit_lane = 1'b1; lo_push = 1'b1;
                 case (ir[2:0])
-                  LANE_RXN:  begin lo_kind = 3'd1; lo_n = {1'b0, ir[9:6]} + 5'd1; end
+                  LANE_RXN:  begin lo_kind = 3'd1; lo_n = {1'b0, ir[9:6]} + 5'd1; lo_flags = {2'd0, ir[3]}; end
                   LANE_EMIT: begin lo_kind = 3'd2; lo_data = rx_; end
                   LANE_START: begin lo_kind = 3'd4; lo_data = rx_; end
                   default:   begin lo_kind = 3'd4; lo_data = l_cap[li] + rx_; end
