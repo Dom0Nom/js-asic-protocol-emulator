@@ -11,7 +11,7 @@ def test_every_word_roundtrips():
         legal += 1
         assert isa.encode(i.name, rd=i.rd, rs=i.rs, rt=i.rt & (3 if i.name == "txcrc" else 7),
                           imm=i.imm, lane=i.lane) == w, (hex(w), i)
-    assert legal == 56832
+    assert legal == 56896  # 56832 + 64 for sti
 
 
 def test_examples():

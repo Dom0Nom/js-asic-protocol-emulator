@@ -1,7 +1,7 @@
 """Host side of the Tempo host SPI port, as a board device.
 
-Plays the role of the demo board RP2040: drives HCS_N (ui7), HSCK (ui6),
-HMOSI (ui5) in SPI mode 0 and samples HMISO (uo7) on each rising SCK edge.
+Plays the role of the demo board RP2350: drives HCS_N (ui7), HSCK (ui5),
+HMOSI (ui6) in SPI mode 0 and samples HMISO (uo3) on each rising SCK edge.
 Transactions run one after another; each records the bytes read back.
 """
 
@@ -23,7 +23,7 @@ class Transaction:
 
 
 class HostDriver(Device):
-    def __init__(self, half_period=5, cs="ui7", sck="ui6", mosi="ui5", miso="uo7", gap=4):
+    def __init__(self, half_period=6, cs="ui7", sck="ui5", mosi="ui6", miso="uo3", gap=4):
         self.half = half_period
         self.nets = (cs, sck, mosi, miso)
         self.gap = gap

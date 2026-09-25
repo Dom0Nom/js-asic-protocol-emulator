@@ -74,3 +74,16 @@ Considered: writing a custom `PDN_CFG` with TopMetal1 straps (as pulp-platform/c
 ## Simulator timing model
 
 The simulator is a synchronous, cycle-level model of the whole chip, not an instruction-level one: `step(pad_inputs)` returns the pad outputs driven during that cycle and then advances every register by one clock edge. Each thread's instruction is modelled as executing in one cycle (its issue cycle, `NOW mod 4 = thread`) with all effects visible from the next cycle. The RTL pipeline is arranged so its execute stage lines up with those cycles. Because the model predicts every pad on every cycle, RTL tests compare full pin traces as well as architectural state.
+
+## Use-case RTL batch, 2026-09-25
+
+Building the bench-tool use cases (`notes/use-case-plan.md`) and a fresh-context critic review of that plan turned up hardware needs that firmware cannot cover. They were made in one batch before the next harden, costed by synthesis of `tempo_core` against HEAD: 24,451 to 24,742 cells, 360.8k to 364.9k um² (+1.1%), 3,216 to 3,263 flops.
+
+- `sti rd, rs`: threads store to the instruction SRAM (two slots, like `ldi`, through the thread's own fetch slot, so no other thread is delayed). Chosen over a deeper mailbox or a second RAM: the SRAM has ~800 spare words, which become receive buffers (UART console, bus monitor, edge capture) and emulated-device storage (a 24C02 image). Cost: two 26-bit latches.
+- External-clock receive (`MODE.XCLK`): a receive samples I on an edge of the C input instead of on its own timeline. Needed for passive SPI and I2C monitoring and for the receive half of target emulation; the firmware alternative (pattern event plus `ior`) loses bits silently because pattern events do not queue. Receive only: a transmit on an external clock would also be needed for an SPI target and was left out (cost and verification effort; I2C target transmit works with stretching and timed slots).
+- `CAP` latches only while no command runs (bug 18).
+- After an `emit`, C holds the emitted level (bug 17).
+- Host port on the RP2350's hardware SPI0 pins (SCK `ui[5]`, MOSI `ui[6]`, MISO `uo[3]`): the demo board for IHP shuttles carries an RP2350B (see `notes/research-host.md`), and `machine.SPI` moves bytes in C, where a Python bit-bang or PIO loop would bound every use case's throughput. Output index 11 moves to `uo[7]`. No cells.
+- Mailbox commands return the count the port will take or give and never exceed it, plus an error-summary bit, and the status command reports each lane's flags (bug 19). The host never needs a status read to stay correct, and reads one only when the error bit is set.
+
+Not taken from the critic review, with reasons: a separate IMEM read/write port for threads (the fetch-slot reuse above gives the same buffering at a fraction of the area); a channel-tagged mailbox in hardware (a firmware dispatcher does it, see the resident image); a CMSIS-DAP shim on the RP2350 (out of scope for silicon; the host library is the API, and a PC transport over the RP2350's USB serial is planned).

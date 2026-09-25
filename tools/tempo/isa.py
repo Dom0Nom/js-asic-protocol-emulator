@@ -17,7 +17,7 @@ OP_ALU3, OP_ALU2, OP_LI, OP_ADDI, OP_CMPI, OP_ANDI, OP_IMM8, OP_MEM = range(8)
 OP_B, OP_DJNZ, OP_J, OP_SYS, OP_LREG, OP_LDI, OP_TX, OP_LANE = range(8, 16)
 
 ALU3_FN = ["add", "sub", "and", "or", "xor", "shl", "shr", "asr"]
-ALU2_FN = ["mov", "not", "neg", "cmp", "tst", "par", "brev", "swab"]
+ALU2_FN = ["mov", "not", "neg", "cmp", "tst", "par", "brev", "swab", "sti"]
 ALU2_SHIFT = {1: "shli", 2: "shri", 3: "rori"}  # fn[5:4] selects, fn[3:0] = k
 COND = ["al", "eq", "ne", "cs", "cc", "mi", "pl", "hi"]
 SYS_FN = ["nop", "halt", "jr", "now", "waitt", "ior", "iow", "ioe",

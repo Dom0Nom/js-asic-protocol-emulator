@@ -32,6 +32,7 @@ localparam ALU2_TST = 6'd4;
 localparam ALU2_PAR = 6'd5;
 localparam ALU2_BREV = 6'd6;
 localparam ALU2_SWAB = 6'd7;
+localparam ALU2_STI = 6'd8;
 localparam ALU2SEL_SHLI = 2'd1;
 localparam ALU2SEL_SHRI = 2'd2;
 localparam ALU2SEL_RORI = 2'd3;

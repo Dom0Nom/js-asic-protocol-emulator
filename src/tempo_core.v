@@ -4,7 +4,7 @@
  * the top level. Modelled cycle for cycle by tools/tempo/sim.py.
  *
  * Pipeline, for a thread that executes in cycle e (NOW mod 4 = thread):
- *   e-2  fetch: IMEM address = PC (or the ldi data address)
+ *   e-2  fetch: IMEM address = PC (or the ldi/sti data address; sti writes)
  *   e-1  SRAM data out, captured into IR
  *   e    execute: read registers, check, commit everything at the clock edge
  *
@@ -43,7 +43,8 @@ module tempo_core (
   reg [15:0] now;
   reg [9:0]  pc [0:3];
   reg [15:0] regs [0:31];
-  reg [3:0]  fz, fc, fn, late, run, step, illegal, ldi_phase;
+  reg [3:0]  fz, fc, fn, late, run, step, illegal, ldi_phase, ldi_st;
+  reg [15:0] sti_data [0:1];  // store data, one latch per thread parity
   reg [9:0]  ldi_addr [0:3];
   reg [2:0]  ldi_rd [0:3];
   reg        fv1, irv;
@@ -71,11 +72,12 @@ module tempo_core (
   wire        h_grant_rd = !f_run && !h_wr_pend && h_rd_pend;
   reg         h_rd_capture;
 
+  wire        f_st = f_run && ldi_phase[ft] && ldi_st[ft];  // sti second slot: write
   assign imem_addr = f_run ? (ldi_phase[ft] ? ldi_addr[ft] : pc[ft]) :
                      (h_grant_wr ? h_wr_addr : h_rd_addr);
-  assign imem_ren  = f_run || h_grant_rd;
-  assign imem_wen  = h_grant_wr;
-  assign imem_din  = h_wr_data;
+  assign imem_ren  = (f_run && !f_st) || h_grant_rd;
+  assign imem_wen  = h_grant_wr || f_st;
+  assign imem_din  = f_run ? sti_data[ft[0]] : h_wr_data;
 
   // ------------------------------------------------------------ decode
   wire [3:0] op  = ir[15:12];
@@ -95,7 +97,7 @@ module tempo_core (
   wire [2:0] saddr = ry[2:0] + ir[2:0];  // scratch address, mod 8
 
   wire illegal_insn =
-      (op == OP_ALU2 && fn6[5:4] == 2'b00 && fn6[3]) ||
+      (op == OP_ALU2 && fn6[5:4] == 2'b00 && fn6[3] && fn6[2:0] != 3'd0) ||
       (op == OP_J && ir[10]) ||
       (op == OP_SYS && fn6 > SYS_TSTAT) ||
       (op == OP_LREG && ir[1:0] != 2'b00);
@@ -190,6 +192,9 @@ module tempo_core (
       .clk(clk), .rst_n(rst_n), .pins_in(pins_in), .miso(hp_miso),
       .run(run), .illegal(illegal), .late(late), .t2h_count(t2h_n), .h2t_count(h2t_n),
       .t2h_head(t2h[0]), .lane_flags(lane_flags), .pinconflict(pinconflict),
+      .any_err((|illegal) | (|late) | pinconflict | (|lane_flags[6:2])),
+      .lane_st({l_status[3][0], l_status[3][9:3], l_status[2][0], l_status[2][9:3],
+                l_status[1][0], l_status[1][9:3], l_status[0][0], l_status[0][9:3]}),
       .reg_val(hp_rval), .imem_rdata(hp_rdata),
       .ctl_v(hp_ctl_v), .ctl(hp_ctl), .pc_v(hp_pc_v), .pc_t(hp_pc_t), .pc_val(hp_pc),
       .h2t_v(hp_h2t_v), .h2t_word(hp_h2t), .t2h_pop(hp_t2h_pop), .step_v(hp_step_v), .step_t(hp_step_t),
@@ -215,7 +220,7 @@ module tempo_core (
 
     if (ex_valid && ldi_phase[te]) begin
       ex_commit = 1'b1;
-      wr_en = 1'b1; wr_idx = ldi_rd[te]; wr_val = ir;
+      wr_en = !ldi_st[te]; wr_idx = ldi_rd[te]; wr_val = ir;
     end else if (ex_valid && !illegal_insn) begin
       ex_commit = 1'b1;
       case (op)
@@ -242,6 +247,9 @@ module tempo_core (
             res = a >> sh; if (sh != 4'd0) begin set_c = 1'b1; c_val = a[sh - 4'd1]; end
           end else if (fn6[5:4] == 2'b11) begin
             res = (a >> sh) | (a << (5'd16 - {1'b0, sh}));
+          end else if (fn6[3]) begin
+            // sti, first slot: the thread's next fetch slot writes IMEM
+            ex_commit = 1'b0; wr_en = 1'b0; set_z = 1'b0; set_n = 1'b0;
           end else begin
             case (fn6[2:0])
               ALU2_MOV[2:0]: begin res = a; set_z = 1'b0; set_n = 1'b0; end
@@ -425,7 +433,8 @@ module tempo_core (
   always @(posedge clk) begin
     if (!rst_n) begin
       now <= 16'd0;
-      fz <= 0; fc <= 0; fn <= 0; late <= 0; run <= 0; step <= 0; illegal <= 0; ldi_phase <= 0;
+      fz <= 0; fc <= 0; fn <= 0; late <= 0; run <= 0; step <= 0; illegal <= 0; ldi_phase <= 0; ldi_st <= 0;
+      sti_data[0] <= 16'd0; sti_data[1] <= 16'd0;
       for (q = 0; q < 4; q = q + 1) begin
         pc[q] <= 10'd0; ldi_addr[q] <= 10'd0; ldi_rd[q] <= 3'd0; h2t[q] <= 16'd0; t2h[q] <= 16'd0;
       end
@@ -466,8 +475,15 @@ module tempo_core (
       end
       if (ex_valid && !ldi_phase[te] && !illegal_insn && op == OP_LDI) begin
         ldi_phase[te] <= 1'b1;
+        ldi_st[te] <= 1'b0;
         ldi_addr[te] <= ry[9:0] + {4'd0, ir[5:0]};
         ldi_rd[te] <= fa;
+      end
+      if (ex_valid && !ldi_phase[te] && !illegal_insn && op == OP_ALU2 && fn6 == ALU2_STI) begin
+        ldi_phase[te] <= 1'b1;
+        ldi_st[te] <= 1'b1;
+        ldi_addr[te] <= ry[9:0];
+        sti_data[te[0]] <= rx_;
       end
       if (ex_commit) begin
         if (wr_en) regs[{te, wr_idx}] <= wr_val;

@@ -159,12 +159,14 @@ Time comparison: `after(a, b)` is true when `(a - b) mod 2^16 < 2^15`. Deadlines
 | Index | Output | Input |
 |---|---|---|
 | 0-7 | `uio_out[i]`, enable `uio_oe[i]` | `uio_in[i]` |
-| 8-14 | `uo_out[i-8]` (always driven) | `ui_in[i-8]` |
-| 15 | none (`uo_out[7]` is the host MISO) | none in lane pin fields; `ior` bit 15 reads `ui_in[7]` (host CS) |
+| 8-14 | `uo_out[i-8]` (always driven), except index 11, which is on `uo_out[7]` | `ui_in[i-8]` |
+| 15 | none (the host MISO, on `uo_out[3]`) | none in lane pin fields; `ior` bit 15 reads `ui_in[7]` (host CS) |
+
+The host MISO sits on `uo_out[3]` because that pad is the RP2350's SPI0 RX pin on the demo board (with SCK on `ui_in[5]` and MOSI on `ui_in[6]`), which lets the board use its hardware SPI for the host port. Output index 11 therefore appears on `uo_out[7]`; inputs are not permuted.
 
 A lane pin field set to 15 means "no pin". Every input passes a two-flop synchroniser; lane inputs then pass an optional stability filter (`MODE.FILTER`). Output resolution: each output index takes the value and enable of the highest-priority lane that drives it (lane 0 highest), else `GOUT`/`GOE`. The resolved `uo_out`, `uio_out` and `uio_oe` are registered, so every pad changes only on a clock edge, one cycle after the lane or GPIO state that caused it. If two lanes both drive a pin, the global `PINCONFLICT` flag is set (host status).
 
-Host port pins: `ui[7]` `HCS_N`, `ui[6]` `HSCK`, `ui[5]` `HMOSI`, `uo[7]` `HMISO`.
+Host port pins: `ui[7]` `HCS_N`, `ui[5]` `HSCK`, `ui[6]` `HMOSI`, `uo[3]` `HMISO`.
 
 ### Threads
 
@@ -174,6 +176,8 @@ Thread `t` executes on cycles where `NOW mod 4 = t`. An instruction reads state 
 
 After the host sets a thread's run bit in cycle `c`, the thread first executes in the first cycle `e >= c + 3` with `e mod 4 = t`. Reset: all threads halted, `PC = 0`.
 
+`sti` and `ldi` use the thread's own next fetch slot for their data access (`sti` writes IMEM there instead of fetching), so both take two slots and neither delays another thread. The store data waits in one of two latches selected by thread parity: threads of equal parity execute two cycles apart, which is exactly the gap between a `sti` and its write.
+
 ### Instruction encoding
 
 16-bit words. Register fields only ever sit at `[11:9]`, `[8:6]` or `[5:3]`, so the register file needs two read ports. `rd`, `rs`, `rt` are 3-bit register fields, `L` a 2-bit lane. `simm9` is sign extended. Branch targets are `PC + 1 + offset`. Unlisted encodings are illegal: the thread halts and the host status reports it.
@@ -181,7 +185,7 @@ After the host sets a thread's run bit in cycle `c`, the thread first executes i
 | `[15:12]` | Mnemonic | Fields | Operation |
 |---|---|---|---|
 | 0 | ALU3 | `rd[11:9] rs[8:6] rt[5:3] fn[2:0]` | `rd = rs op rt`, `fn`: `add sub and or xor shl shr asr`. Shift count is `rt[3:0]`. Z, N from the result. C: carry for add, "no borrow" for sub, last bit shifted out for shifts with count > 0, unchanged otherwise. |
-| 1 | ALU2 | `rd[11:9] rs[8:6] fn[5:0]` | `fn` 0-7: `mov not neg cmp tst par brev swab`. `0b01kkkk` `shli rd, rs, k`, `0b10kkkk` `shri`, `0b11kkkk` `rori`. `cmp` sets flags of `rd - rs` (C = no borrow), `tst` of `rd & rs`, no write. Every other ALU2 op except `mov` sets Z and N from its result; `shli`/`shri` also set C to the last bit out when k > 0. |
+| 1 | ALU2 | `rd[11:9] rs[8:6] fn[5:0]` | `fn` 0-7: `mov not neg cmp tst par brev swab`; `fn` 8: `sti rd, rs`, `IMEM[rs mod 1024] = rd`, two slots, flags unchanged (threads can buffer data in unused SRAM; writing over code is allowed and is the programmer's problem). `0b01kkkk` `shli rd, rs, k`, `0b10kkkk` `shri`, `0b11kkkk` `rori`. `cmp` sets flags of `rd - rs` (C = no borrow), `tst` of `rd & rs`, no write. Every other ALU2 op except `mov` sets Z and N from its result; `shli`/`shri` also set C to the last bit out when k > 0. |
 | 2 | `li rd, simm9` | `rd[11:9] imm[8:0]` | `rd = sext(imm)`, flags unchanged. |
 | 3 | `addi rd, simm9` | same | `rd += sext(imm)`, sets Z, N, C (carry). |
 | 4 | `cmpi rd, simm9` | same | flags of `rd - sext(imm)`. |
@@ -256,7 +260,7 @@ Registers (`lr` reads the current value; `lw` goes through the command queue):
 | 12 | `CRC` | 16 | CRC state |
 | 13 | `POLY` | 16 | CRC polynomial |
 | 14 | `CAP` | 16 | `NOW` at the last start-pattern match (read only) |
-| 15 | `MODE` | 16 | `[2:0]` PRE: one time unit is `2^PRE` cycles; `[3]` FRAME; `[4]` CRCINV; `[6:5]` RESYNC edge (0 off, 1 rising, 2 falling, 3 both); `[7]` CAPTURE; `[8]` ARB; `[11:9]` FILTER (input must be stable this many cycles) |
+| 15 | `MODE` | 14 | `[2:0]` PRE: one time unit is `2^PRE` cycles; `[3]` FRAME; `[4]` CRCINV; `[6:5]` RESYNC edge (0 off, 1 rising, 2 falling, 3 both); `[7]` CAPTURE; `[8]` ARB; `[11:9]` FILTER (input must be stable this many cycles); `[13:12]` XCLK: receive on an external clock (0 off, 1 rising, 2 falling, 3 both edges of the filtered C input) |
 
 `CFG`: `[0]` MSB first, `[1]` DOD (D open drain), `[2]` COD (C open drain), `[3]` CEN, `[4]` CPOL, `[5]` STRETCH, `[6]` NRZI, `[7]` DIFF (A = not D), `[10:8]` STUFF (0 off), `[11]` STUFFANY, `[12]` AUTOSTART, `[13]` DREL (release D in receive slots and when idle instead of holding it).
 
@@ -276,16 +280,17 @@ Consecutive commands run back to back. With `FRAME` set, a command that ends whi
 
 - D: for a coded bit, level A of `SYM_b` while `t < split`, level B after. With REL, the levels are XORed with the NRZI line state (differential codes). `emit` drives raw levels for its slot. In receive slots D holds (or is released with `DREL`).
 - A: complement of D with `DIFF`; otherwise holds the last `emit` level.
-- C (if `CEN`): `CPOL xor (CR <= t < CF)`. With `STRETCH` and `COD`, when C is released (at `CR`, or at the start of an `emit` slot that releases it) the lane freezes `t` until the filtered C input reads 1.
+- C (if `CEN`): `CPOL xor (CR <= t < CF)`. When the lane goes idle after a coded (`tx`/receive) slot, C returns to `CPOL`; after an `emit` it keeps the emitted level (an I2C STOP leaves SCL released). With `STRETCH` and `COD`, when C is released (at `CR`, or at the start of an `emit` slot that releases it) the lane freezes `t` until the filtered C input reads 1.
 - At `t = SAMP` the lane samples I (receive commands and `tx x`). A receive command ends one cycle after its last sample, so a new start edge (a UART start bit from a slightly fast sender) is never missed; but if a continuing receive (`c`, possibly behind one `lw`/`start`) is already queued, it runs to the end of its slot instead, so the continuation stays on the bit grid.
 - `RESYNC` (full lanes): during a receive, an I edge of the chosen polarity sets `t` to the synchroniser plus filter latency, so the slot re-aligns to the actual edge. The fractional accumulator is not reset. There is no resynchronisation jump width limit, so CAN receive is best effort.
 - `ARB`: in a `tx x` slot where D was released and the sample reads 0 (outside the last bit), set `ARBLOST` and release D for the rest of the command.
+- `XCLK` (all lanes): a receive command has no timeline. It samples I on each chosen edge of the filtered C input (C is an input; `CEN` should be off) and ends after its last sample, or early on a stop-pattern match (END set). A queued continuation starts at once. This is the receive half of an SPI or I2C target and the basis of the bus monitors; the filter and synchroniser delay C and I equally.
 
 **Coding (full lanes).** Transmit, per data bit in order: CRC update if the command has `c`; stuffing (after `STUFF` equal bits, or ones unless `STUFFANY`, insert the complement without consuming data; the counter runs across commands until an `emit`; a stuff bit owed at the end of a command is sent before that command completes); NRZI (toggle the line state on 0); symbol. `txcrc` bits are stuffed but not fed into the CRC; with `CRCINV` they are inverted. The NRZI line state starts at the current D level, so an `emit` of J before a packet sets it. Receive reverses the order: NRZI decode (1 if the level did not change), destuff (drop the bit after `STUFF` equal bits; `STUFFERR` if it is not the complement), CRC, shift. An echo from `tx x` returns decoded, destuffed bits. A receive queued with `c` keeps the decoder state (NRZI reference level, destuff counter), since stuffing and NRZI span word boundaries; any other receive initialises it, to the I level before the start edge (AUTOSTART) or the current I level.
 
 CRC step for bit `b`: LSB first, `crc = (crc >> 1) ^ (POLY if (crc ^ b) & 1)`; MSB first, `crc = (crc << 1) ^ (POLY if (crc >> 15) ^ b)`.
 
-**Patterns.** Every cycle each lane forms `{prev A,C,I,D, cur A,C,I,D}` from the filtered inputs of its pins and compares with `PAT` and `PATE` under their masks, in every lane state. A start match sets the start-match event and `CAP = NOW`. A stop match sets the stop-match event and, during a receive, ends the word early: the partial word enters the RX FIFO with END set. `wait` consumes events; `stat` clears what it reads.
+**Patterns.** Every cycle each lane forms `{prev A,C,I,D, cur A,C,I,D}` from the filtered inputs of its pins and compares with `PAT` and `PATE` under their masks, in every lane state. A start match sets the start-match event, and, if no command is running, `CAP = NOW`. So `CAP` holds the match that started (or could have started) the current command, e.g. a UART start bit, and data edges inside a running receive do not move it; `sync` anchors to it. A stop match sets the stop-match event and, during a receive, ends the word early: the partial word enters the RX FIFO with END set. `wait` consumes events; `stat` clears what it reads.
 
 **RX FIFO.** Two entries of `{word, count, END, ERR}` (ERR = stuffing error in this word). Words are right-aligned: LSB-first lanes place the first bit at bit 0, MSB-first lanes place the last bit at bit 0. A word that completes while the FIFO is full is dropped and sets `OVERRUN`. `tx` without `x` produces nothing.
 
@@ -301,13 +306,15 @@ SPI mode 0, MSB first, `HCS_N` frames a transaction, `HSCK` at most `clk / 12`. 
 | `0x02` | read IMEM | addr16, one dummy byte, then words |
 | `0x05` | control | byte: `[3:0]` run bits to set, `[7:4]` run bits to clear |
 | `0x06` | set PC | thread byte, addr16 (halted threads only) |
-| `0x07` | status | dummy, then: run bits, illegal-instruction bits, mailbox levels, OR of all lane sticky flags plus `PINCONFLICT` |
-| `0x08` | mailbox write | words into `H2T` (dropped when full) |
-| `0x09` | mailbox read | dummy, then words from `T2H` (0 when empty) |
+| `0x07` | status | dummy, then 8 bytes: `{illegal[3:0], run[3:0]}`, `{T2H level, H2T level}`, `{PINCONFLICT, OR of lane STAT[9:3]}`, thread LATE bits, then per lane k (0-3) `{busy, STAT[9:3]}` |
+| `0x08` | mailbox write | words into `H2T`. The byte after the command returns `{error, 0000, free}`: the port pushes at most `free` words (the H2T space when the command byte completed) and drops the rest, so the host knows exactly how many were taken |
+| `0x09` | mailbox read | the byte after the command returns `{error, 0000, level}`; then words from `T2H`. The port pops at most `level` words; later words read as 0 and are not popped |
 | `0x0A` | step | thread byte: execute one instruction of a halted thread |
 | `0x0B` | read register | thread byte, register byte (0-7, 8 PC, 9 flags), dummy, word (halted threads only) |
 
 Host IMEM accesses use cycles whose fetch slot belongs to a halted thread, so code can be loaded into a halted thread while others run.
+
+`error` in the mailbox replies is 1 when any error flag is set: an illegal instruction, a thread `LATE`, `PINCONFLICT`, or a lane `LATE`, `UNDER`, `STUFFERR`, `OVERRUN` or `ARBLOST`. The host reads the status only when it is set, so reporting flags costs no extra transactions in the common case.
 
 ## Verification hooks built into the architecture
 

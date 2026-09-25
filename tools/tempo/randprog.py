@@ -33,7 +33,8 @@ def lane_value(rng, reg):
     if reg == "mode":
         # small prescaler, no capture most of the time
         return rng.randint(0, 1) | rng.getrandbits(1) << 3 | rng.getrandbits(3) << 4 | \
-            (rng.random() < 0.1) << 7 | rng.getrandbits(1) << 8 | rng.randint(0, 2) << 9
+            (rng.random() < 0.1) << 7 | rng.getrandbits(1) << 8 | rng.randint(0, 2) << 9 | \
+            (rng.randint(1, 3) if rng.random() < 0.4 else 0) << 12  # external-clock receive
     lo, hi = LANE_REG_RANGES[reg]
     return rng.randint(lo, hi)
 
@@ -48,6 +49,8 @@ def thread_block(rng, tid, n):
         L.append(f"{lab(k)}:")
         L.extend(random_insn(rng, tid, k, n, lab))
     L.append(f"{lab(n)}: halt")
+    L.append(f"t{tid}_sub: addi r{rng.randint(0, 6)}, 1")
+    L.append("ret")
     return L
 
 
@@ -59,7 +62,7 @@ def random_insn(rng, tid, k, n, lab):
     if c < 0.22:
         return [f"{rng.choice(isa.ALU3_FN)} {r()}, {r()}, {r()}"]
     if c < 0.32:
-        op = rng.choice(isa.ALU2_FN + list(isa.ALU2_SHIFT.values()))
+        op = rng.choice([f for f in isa.ALU2_FN if f != "sti"] + list(isa.ALU2_SHIFT.values()))
         if op in isa.ALU2_SHIFT.values():
             return [f"{op} {r()}, {r()}, {rng.randint(0, 15)}"]
         return [f"{op} {r()}, {r()}"]
@@ -73,10 +76,31 @@ def random_insn(rng, tid, k, n, lab):
         return [f"{rng.choice(['ld', 'st'])} {r()}, [{r()} + {rng.randint(0, 31)}]"]
     if c < 0.58:
         return [f"b {rng.choice(isa.COND)}, {fwd}"]
-    if c < 0.60:
+    if c < 0.595:
         return [f"j {fwd}"]
-    if c < 0.62:
+    if c < 0.60:
+        return [f"call t{tid}_sub"]
+    if c < 0.605:
+        return [f"li r6, {rng.randint(1, 3)}", f"djnz r6, {fwd}"]
+    if c < 0.615:
+        # guarded blocking ops: wait for the source with a deadline, then
+        # take it only if it is ready (rx, hget, wev would block forever)
+        k = rng.randint(0, 3)
+        src, take = rng.choice([
+            (1 << k, f"rx {r()}, l{k}"),
+            (1 << 8, f"hget {r()}"),
+            (1 << (10 + (e := rng.randint(0, 5))), f"wev {e}"),
+        ])
+        return ["now r6", f"addi r6, {rng.randint(4, 60)}", f"lc r5, {src}", "wany r6, r5",
+                "cmpi r6, 0", f"beq {fwd}", take]
+    if c < 0.625:
         return [f"ldi {r()}, [{r()} + {rng.randint(0, 63)}]"]
+    if c < 0.635:
+        # stores mostly into a data area above the code, rarely anywhere
+        # (self-modifying code is still compared cycle by cycle)
+        if rng.random() < 0.9:
+            return [f"lc r7, {0x380 + rng.randint(0, 127)}", f"sti {r()}, r7"]
+        return [f"sti {r()}, {r()}"]
     if c < 0.72:
         op = rng.choice(["nop", "now", "ior", "iow", "ioe", "sev", "tid", "hcnt", "tstat", "hput"])
         if op == "nop":
@@ -93,6 +117,12 @@ def random_insn(rng, tid, k, n, lab):
         if rng.random() < 0.5:
             return w + [f"waitt {d}"]
         return w + [f"wany {d}, {r()}"]
+    if c < 0.80:
+        # external-clock receive on a noisy input pin (ui0-4 = index 8-12)
+        pins = rng.choice([15, 0, 1]) | rng.randint(8, 12) << 4 | rng.randint(8, 12) << 8 | 15 << 12
+        mode = rng.randint(1, 3) << 12 | rng.randint(0, 2) << 9
+        return [f"lc r7, {pins}", f"lw {lane}, pins, r7", f"lc r7, {mode}", f"lw {lane}, mode, r7",
+                f"rxn {lane}, {rng.randint(1, 16)}"]
     if c < 0.84:
         reg = rng.choice(list(LANE_REG_RANGES))
         val = lane_value(rng, reg)

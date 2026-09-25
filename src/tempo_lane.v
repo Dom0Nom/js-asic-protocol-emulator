@@ -61,7 +61,7 @@ module tempo_lane #(
   reg [15:0] pins, len0, len1, sym0, sym1, pat, pate, crc, poly, cap;
   reg [7:0]  frac;
   reg [12:0] cr, cf, samp;
-  reg [11:0] mode;
+  reg [13:0] mode;
 
   reg        q0_v, q1_v;
   reg [2:0]  q0_kind, q1_kind;
@@ -115,7 +115,7 @@ module tempo_lane #(
   reg [15:0] pins_n, len0_n, len1_n, sym0_n, sym1_n, pat_n, pate_n, crc_n, poly_n, cap_n;
   reg [7:0]  frac_n;
   reg [12:0] cr_n, cf_n, samp_n;
-  reg [11:0] mode_n;
+  reg [13:0] mode_n;
   reg        q0_v_n, q1_v_n;
   reg [2:0]  q0_kind_n, q1_kind_n;
   reg [15:0] q0_data_n, q1_data_n;
@@ -166,7 +166,7 @@ module tempo_lane #(
   reg        rxp_end, rxp_err;
   reg [3:0]  cur4;
   reg [7:0]  pat8;
-  reg        in_d, in_i, in_c, in_a, prev_i, raw, x, lvl, cl, clk_rel, m_start, m_stop, fb;
+  reg        in_d, in_i, in_c, in_a, prev_i, raw, x, lvl, cl, clk_rel, m_start, m_stop, fb, xrx, cedge;
   reg [2:0]  flt, stuff;
   reg [15:0] sym, diff, crc_tmp, w;
   reg [4:0]  k;
@@ -270,10 +270,14 @@ module tempo_lane #(
     pat8 = {prev4, cur4};
     prev_i = prev4[1];
     prev4_n = cur4;
+    // external clock receive (MODE[13:12]: sample I on C rising / falling)
+    cedge = (in_c != prev4[2]) && ((mode[12] && in_c) || (mode[13] && !in_c));
+    xrx = (mode[13:12] != 2'd0) && cur_kind == K_RX;
     m_start = (pat[15:8] != 8'd0) && ((pat8 & pat[15:8]) == (pat[7:0] & pat[15:8]));
     m_stop = (pate[15:8] != 8'd0) && ((pat8 & pate[15:8]) == (pate[7:0] & pate[15:8]));
     if (m_start) begin
-      ev_start_n = 1'b1; set_start = 1'b1; stat_n[0] = 1'b1; cap_n = now;
+      ev_start_n = 1'b1; set_start = 1'b1; stat_n[0] = 1'b1;
+      if (!cur_v) cap_n = now;  // CAP marks matches that can start a command
     end
     if (m_stop) begin
       ev_stop_n = 1'b1; set_stop = 1'b1; stat_n[1] = 1'b1;
@@ -290,8 +294,8 @@ module tempo_lane #(
         if (in_c) frozen_n = 1'b0;
         else done = 1'b1;
       end
-      if (!done && pre == 8'd0) begin
-        if (cfg[5] && cfg[2] && !frozen_done) begin
+      if (!done && (pre == 8'd0 || xrx)) begin
+        if (cfg[5] && cfg[2] && !frozen_done && !xrx) begin
           if (slot_kind == SK_EMIT) clk_rel = (t == 17'd0) && !c[1];
           else if (cfg[3]) clk_rel = (t == {4'd0, cr}) && !c[1];
           if (clk_rel && !in_c) begin
@@ -300,7 +304,7 @@ module tempo_lane #(
             done = 1'b1;
           end
         end
-        if (!done && slot_sample && t == {4'd0, samp}) begin
+        if (!done && (xrx ? cedge : (slot_sample && t == {4'd0, samp}))) begin
           // Lane.take_sample
           if (slot_kind == SK_TX && mode[8] && !d[1] && !in_i && !tx_last) begin
             if (!arb_lost_cmd) stat_n[6] = 1'b1;
@@ -339,7 +343,7 @@ module tempo_lane #(
             if (cur_kind == K_RX && rcount_n >= cur_n && !destuff_n) begin
               rx_push = 1'b1; rxp_word = rword_n; rxp_count = rcount_n; rxp_err = rerr_n;
               rword_n = 16'd0; rcount_n = 5'd0; rerr_n = 1'b0;
-              if (cont_q) begin
+              if (cont_q && !xrx) begin
                 rx_complete_n = 1'b1;  // stay on the bit grid until the slot ends
               end else begin
                 fin = 1'b1;
@@ -355,7 +359,7 @@ module tempo_lane #(
         fin = 1'b1;
         done = 1'b1;
       end
-      if (!done && FULL && mode[6:5] != 2'd0 && slot_sample && cur_kind == K_RX && in_i != prev_i &&
+      if (!done && FULL && !xrx && mode[6:5] != 2'd0 && slot_sample && cur_kind == K_RX && in_i != prev_i &&
           (mode[6:5] == 2'd3 || (mode[6:5] == 2'd1 && in_i) || (mode[6:5] == 2'd2 && !in_i))) begin
         if (rx_complete) begin
           fin = 1'b1;          // the edge starts the next bit: hand over to the continuation
@@ -367,7 +371,7 @@ module tempo_lane #(
         end
         done = 1'b1;
       end
-      if (!done) begin
+      if (!done && !xrx) begin
         pre_n = pre + 8'd1;
         if ((pre_n >> mode[2:0]) != 8'd0) begin
           pre_n = 8'd0;
@@ -436,7 +440,7 @@ module tempo_lane #(
           4'd12: crc_n = FULL ? q0_data : 16'd0;
           4'd13: poly_n = FULL ? q0_data : 16'd0;
           4'd14: ;
-          default: mode_n = FULL ? q0_data[11:0] : (q0_data[11:0] & 12'hF8F);
+          default: mode_n = FULL ? q0_data[13:0] : (q0_data[13:0] & 14'h3F8F);
         endcase
       end else begin
         pend_v_n = 1'b1;
@@ -598,7 +602,7 @@ module tempo_lane #(
     // ---- stage 9: idle levels after a command ends (Lane.hold_levels)
     if (fin && !cur_v_n) begin
       if (cfg_n[13]) d_n[1] = 1'b0;
-      if (cfg_n[3] && owned_n[2]) begin
+      if (cfg_n[3] && owned_n[2] && cur_kind != K_EMIT) begin  // an emit's C level holds
         cl = cfg_n[4];
         if (cfg_n[2]) c_n = {~cl, 1'b0};
         else c_n = {1'b1, cl};
@@ -693,7 +697,7 @@ module tempo_lane #(
       4'd12: rd_data = crc;
       4'd13: rd_data = poly;
       4'd14: rd_data = cap;
-      default: rd_data = {4'd0, mode};
+      default: rd_data = {2'd0, mode};
     endcase
   end
 

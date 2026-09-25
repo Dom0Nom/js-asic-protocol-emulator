@@ -42,8 +42,7 @@ async def test_host_boot_and_uart_tx(dut):
     await ls.run(100)  # firmware sets the line idle; uo0 is low from reset until then
     rx = ls.attach(UartRx("uo0", 3_000_000))
     data = [0x55, 0x00, 0xFF, 0xA5, 0x3C]
-    ls.h.host.mbox_write(data)
-    await ls.boot()
+    await ls.mbox_write(data)
     await ls.run(17 * 10 * (len(data) + 1))
     assert rx.bytes == data, rx.bytes
     assert not rx.errors
@@ -58,13 +57,12 @@ async def test_spi_mode3_flash_read(dut):
     flash = ls.attach(SpiFlashLike("uio2", "uio0", "uio1", "uio3", mode=3,
                                    mem=bytearray(range(256)), min_setup_cycles=2, min_hold_cycles=2))
     END = 0x8000
-    ls.h.host.mbox_write([0x03, 0x00, 0x00])
-    ls.h.host.mbox_write([0x20, 0, END | 0])
-    await ls.boot()
-    await ls.run(600)
-    got = ls.h.host.mbox_read(6)  # cmd, 3 address bytes, 2 data bytes
-    await ls.boot()
-    assert got.words(2)[4:6] == [0x20, 0x21], got.words(2)
+    await ls.mbox_write([0x03, 0x00, 0x00, 0x20])
+    await ls.run(300)
+    got = await ls.mbox_read(4)  # replies to cmd and 3 address bytes
+    await ls.mbox_write([0, END | 0])
+    got += await ls.mbox_read(2)
+    assert got[4:6] == [0x20, 0x21], got
     assert not flash.violations
 
 
@@ -77,14 +75,10 @@ async def test_i2c_write_read_with_stretching(dut):
     START, STOP, WR, RDN = 1, 2, 3, 5
     cmds = [(START, 0), (WR, 0xA0), (WR, 0x10), (WR, 0x5A), (START, 0), (WR, 0xA0), (WR, 0x10),
             (START, 0), (WR, 0xA1), (RDN, 0), (STOP, 0)]
-    ls.h.host.mbox_write([c << 8 | d for c, d in cmds[:4]])
-    ls.h.host.mbox_write([c << 8 | d for c, d in cmds[4:8]])
-    ls.h.host.mbox_write([c << 8 | d for c, d in cmds[8:]])
-    await ls.boot()
+    await ls.mbox_write([c << 8 | d for c, d in cmds])
     await ls.run(8000)
-    rep = ls.h.host.mbox_read(4)
-    await ls.boot()
-    assert rep.words(2)[:4] == [0, 0, 0, 0]
+    rep = await ls.mbox_read(4)
+    assert rep == [0, 0, 0, 0], rep
     assert tgt.regs[0x10] == 0x5A
     assert not tgt.violations, tgt.violations[:4]
 
@@ -99,16 +93,13 @@ async def test_usb_ls_rx_and_tx(dut):
     tx = ls.attach(UsbLsTransmitter("uio7", "uio6", bit_rate_error=0.015))
     tx.send_data("DATA1", bytes([0xFF, 0xFF, 0x7E, 0x00, 0x81]))
     await ls.run(34 * 90)
-    got = ls.h.host.mbox_read(6)  # 9 bytes in 5 words, then the end word
-    await ls.boot()
-    words = got.words(2)
+    words = await ls.mbox_read(6)  # 9 bytes in 5 words, then the end word
     b = [x for w in words[:5] for x in (w & 0xFF, w >> 8)][:9]
     assert b[:7] == [0x80, 0x4B, 0xFF, 0xFF, 0x7E, 0x00, 0x81], [hex(w) for w in words]
     assert words[5] == 0xE000 | 0x100 | 9 << 4, [hex(w) for w in words]  # residual ok, 9 bytes
     # answer with ACK through lane 0; the model checks the waveform
     rx = ls.attach(UsbLsReceiver("uio7", "uio6"))
-    ls.h.host.mbox_write([0xD2])  # ACK PID byte, no data, no CRC
-    await ls.boot()
+    await ls.mbox_write([0xD2])  # ACK PID byte, no data, no CRC
     await ls.run(34 * 30)
     assert [p.pid for p in rx.packets][-1] == "ACK", (rx.packets, rx.errors)
     assert not rx.errors
@@ -150,9 +141,8 @@ async def test_uart_rx_fast_sender(dut):
     data = [0x00, 0xFF, 0xA5, 0x5A]
     tx.send(bytes(data))
     await ls.run(50 * 10 * 5)
-    got = ls.h.host.mbox_read(4)
-    await ls.boot()
-    assert got.words(2) == data, got.words(2)
+    got = await ls.mbox_read(4)
+    assert got == data, got
 
 
 @cocotb.test()
@@ -161,10 +151,8 @@ async def test_spi_mode0_jedec(dut):
     await ls.start()
     await ls.boot()
     flash = ls.attach(SpiFlashLike("uio2", "uio0", "uio1", "uio3", mode=0, min_setup_cycles=2, min_hold_cycles=2))
-    ls.h.host.mbox_write([0x9F, 0, 0, 0x8000])
-    await ls.boot()
+    await ls.mbox_write([0x9F, 0, 0, 0x8000])
     await ls.run(700)
-    got = ls.h.host.mbox_read(4)
-    await ls.boot()
-    assert got.words(2)[1:4] == [0xAA, 0x55, 0x01], got.words(2)
+    got = await ls.mbox_read(4)
+    assert got[1:4] == [0xAA, 0x55, 0x01], got
     assert not flash.violations and not ls.board.contention

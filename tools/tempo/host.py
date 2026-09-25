@@ -1,7 +1,9 @@
 """Host SPI port model (docs/architecture.md, Host port).
 
-Works on the synchronised pins like the RTL: HMOSI is input index 13
-(ui[5]), HSCK 14 (ui[6]), HCS_N 15 (ui[7]). MOSI is sampled on a synchronised
+Works on the synchronised pins like the RTL: HSCK is input index 13
+(ui[5]), HMOSI 14 (ui[6]), HCS_N 15 (ui[7]); HMISO is output index 15, which
+the top level puts on uo[3]. These are the RP2350's SPI0 SCK, TX and RX pins
+on the demo board. MOSI is sampled on a synchronised
 SCK rising edge, and MISO moves to the next bit on that same edge (a few
 cycles after the host sampled it). The byte shifted out during
 transaction byte k+1 is loaded when byte k completes.
@@ -31,6 +33,7 @@ class HostPort:
         self.wr_pend = None  # (addr, data)
         self.rd_pend = None  # addr
         self.rdata = 0
+        self.rcnt = 0  # words a mailbox read may still pop, or a write may still push
         self.ops = []  # applied after the thread executes (pre-edge reads)
 
     @property
@@ -53,8 +56,8 @@ class HostPort:
     def clock(self):
         pins = self.chip.pins_in
         cs = not (pins >> 15) & 1
-        sck = (pins >> 14) & 1
-        mosi = (pins >> 13) & 1
+        sck = (pins >> 13) & 1
+        mosi = (pins >> 14) & 1
         if not cs:
             self.cs_active = False
             self.sck_prev = sck
@@ -101,11 +104,30 @@ class HostPort:
                 th.step = True
         self.ops = []
 
+    def error(self) -> int:
+        """1 if any error flag is set: illegal instruction, thread LATE,
+        PINCONFLICT, or a lane LATE/UNDER/STUFFERR/OVERRUN/ARBLOST."""
+        ch = self.chip
+        e = ch.pinconflict or any(t.illegal or t.late for t in ch.threads)
+        for lane in ch.lanes:
+            e = e or bool(lane.status() & 0x3E0)
+        return int(bool(e))
+
     def byte(self, i, b) -> int:
         """Handle transaction byte i; return the byte to shift out next."""
         ch = self.chip
         if i == 0:
             self.cmd = b
+            if b == 0x09:
+                # the byte after the command carries the T2H level; the read
+                # pops at most that many words
+                self.rcnt = len(ch.t2h)
+                return self.rcnt | self.error() << 7
+            if b == 0x08:
+                # ... and for a write, the free H2T space; the write pushes at
+                # most that many words and drops the rest
+                self.rcnt = 4 - len(ch.h2t)
+                return self.rcnt | self.error() << 7
             return 0
         c = self.cmd
         if c in (0x01, 0x02):  # IMEM write / read
@@ -155,17 +177,23 @@ class HostPort:
                 return f | ch.pinconflict << 7
             if i == 4:
                 return sum(ch.threads[t].late << t for t in range(4))
+            if 5 <= i <= 8:
+                lane = ch.lanes[i - 5]
+                st = lane.status()
+                return (st >> 3) & 0x7F | (st & 1) << 7
             return 0
         if c == 0x08:
             if i % 2 == 1:
                 self.hi = b
-            elif len(ch.h2t) < 4:
+            elif self.rcnt:
+                self.rcnt -= 1
                 self.ops.append(("h2t", (self.hi << 8) | b))
             return 0
         if c == 0x09:
             if i % 2 == 1:
-                self.word = ch.t2h[0] if ch.t2h else 0
-                if ch.t2h:
+                self.word = ch.t2h[0] if self.rcnt else 0
+                if self.rcnt:
+                    self.rcnt -= 1
                     self.ops.append(("t2h_pop",))
                 return self.word >> 8
             return self.word & 0xFF

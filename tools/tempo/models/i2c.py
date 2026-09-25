@@ -4,14 +4,14 @@ Both nets are open-drain: devices here only ever drive 0 or None, and the
 board's pull-up resolves an undriven net to 1.
 
 Timing minimums are from NXP UM10204 (I2C-bus specification and user
-manual, rev. 7) Table 10, standard-mode (100 kHz) and fast-mode (400 kHz)
-columns. Values are in seconds here and converted to whole cycles with the
+manual, Rev. 7.0, 2021) section 6.1, Table 11: Standard-mode (100 kHz),
+Fast-mode (400 kHz) and Fast-mode Plus (1 MHz) columns (see docs/specs.md). Values are in seconds here and converted to whole cycles with the
 device's clock_hz at construction time.
 """
 
-# NXP UM10204 rev 7, Table 10 "Characteristics of the SDA and SCL bus lines
-# for Standard, Fast, and Fast-mode Plus I2C-bus devices". Only the
-# standard/fast columns we use.
+# NXP UM10204 Rev. 7.0, Table 11 "Characteristics of the SDA and SCL bus
+# lines for Standard, Fast, and Fast-mode Plus I2C-bus devices" (it was
+# Table 10 in Rev. 6).
 _TIMING = {
     'standard': {
         't_hd_sta': 4.0e-6,
@@ -30,6 +30,15 @@ _TIMING = {
         't_su_dat': 100e-9,
         't_su_sto': 0.6e-6,
         't_buf': 1.3e-6,
+    },
+    'fastplus': {
+        't_hd_sta': 0.26e-6,
+        't_low': 0.5e-6,
+        't_high': 0.26e-6,
+        't_su_sta': 0.26e-6,
+        't_su_dat': 50e-9,
+        't_su_sto': 0.26e-6,
+        't_buf': 0.5e-6,
     },
 }
 
@@ -184,6 +193,7 @@ class _I2cBusBase:
         self._on_bus_start(cycle)
 
     def _on_stop(self, cycle):
+        self._matched10 = False
         if self._last_scl_rising is not None:
             su = cycle - self._last_scl_rising
             if su < self._t['t_su_sto']:
@@ -270,9 +280,11 @@ class I2cTarget(_I2cBusBase):
     """
 
     def __init__(self, scl, sda, address, regs=None, mode='standard', clock_hz=50e6,
-                 stretch_cycles=0, nack_addresses=(), nack_after=None):
+                 stretch_cycles=0, nack_addresses=(), nack_after=None, addr10=False):
         super().__init__(scl, sda, mode=mode, clock_hz=clock_hz)
         self.address = address
+        self.addr10 = addr10  # UM10204 3.1.11 10-bit addressing
+        self._matched10 = False
         self.regs = regs if regs is not None else bytearray(256)
         self.stretch_cycles = stretch_cycles
         self.nack_addresses = set(nack_addresses)
@@ -295,7 +307,33 @@ class I2cTarget(_I2cBusBase):
     def _on_byte_complete(self, cycle, byte):
         self._just_addressed = False
 
+        if self.addr10 and self._role == 'expect_addr' and byte >> 3 == 0b11110:
+            hi, rw = (byte >> 1) & 3, byte & 1
+            self._just_addressed = True
+            if rw == 0:
+                self._will_ack_addr = hi == self.address >> 8
+                self._role = 'addr10_lo' if self._will_ack_addr else None
+                self._matched10 = False
+            else:
+                # read: Sr + first byte with R, only if both bytes matched before
+                self._will_ack_addr = self._matched10 and hi == self.address >> 8
+                self._role = 'read_data' if self._will_ack_addr else None
+                if self._will_ack_addr:
+                    self._load_out_byte()
+            self.events.append(I2cEvent(cycle, 'address10_hi', {'hi': hi, 'rw': rw, 'ack': self._will_ack_addr}))
+            return
+        if self._role == 'addr10_lo':
+            self._just_addressed = True
+            self._will_ack_addr = byte == (self.address & 0xFF)
+            self._matched10 = self._will_ack_addr
+            self._role = 'reg_ptr' if self._will_ack_addr else None
+            self.events.append(I2cEvent(cycle, 'address10_lo', {'lo': byte, 'ack': self._will_ack_addr}))
+            return
+
         if self._role == 'expect_addr':
+            if self.addr10:
+                self._role = None
+                return
             addr = byte >> 1
             rw = byte & 1
             match = addr == self.address
@@ -401,3 +439,104 @@ class I2cTarget(_I2cBusBase):
             if bit == 0:
                 drive[self.sda] = 0
         return drive
+
+
+class Eeprom24Target(I2cTarget):
+    """24Cxx serial EEPROM (Microchip AT24C02C / 24LC256 behaviour, see
+    docs/specs.md): 1 or 2 memory address bytes, block-select bits in the
+    device address for 24C04/08/16, page writes that roll over inside the
+    page, and a self-timed write cycle after STOP during which the part
+    NACKs its address (ACK polling). `t_wr` is in seconds; tests shorten
+    it to keep simulations fast."""
+
+    def __init__(self, scl, sda, size=256, page=8, abytes=1, address=0x50, t_wr=5e-3,
+                 mode='standard', clock_hz=50e6, stretch_cycles=0):
+        super().__init__(scl, sda, address, regs=bytearray([0xFF]) * size, mode=mode,
+                         clock_hz=clock_hz, stretch_cycles=stretch_cycles)
+        self.size, self.page, self.abytes = size, page, abytes
+        self.t_wr_cycles = max(1, round(t_wr * clock_hz))
+        self.busy_until = -1
+        self._blocks = max(1, size // 256) if abytes == 1 else 1
+        self._pending = []  # (address, byte) written at STOP
+        self._addr_left = 0
+        self.writes = 0  # completed write cycles
+
+    def _on_bus_start(self, cycle):
+        self._role = 'expect_addr'
+
+    def _on_byte_complete(self, cycle, byte):
+        self._just_addressed = False
+        if self._role == 'expect_addr':
+            dev = byte >> 1
+            rw = byte & 1
+            base = self.address & ~(self._blocks - 1)
+            match = (dev & ~(self._blocks - 1)) == base
+            busy = cycle < self.busy_until
+            self._will_ack_addr = match and not busy
+            self._just_addressed = True
+            self.events.append(I2cEvent(cycle, 'address', {'addr': dev, 'rw': rw, 'ack': self._will_ack_addr}))
+            if not self._will_ack_addr:
+                self._role = None
+                return
+            blk = (dev & (self._blocks - 1)) << 8
+            if rw:
+                if self.abytes == 1:
+                    self.pointer = blk | (self.pointer & 0xFF)
+                self._role = 'read_data'
+                self._load_out_byte()
+            else:
+                self._role = 'reg_ptr'
+                self._blk = blk
+                self._addr_left = self.abytes
+                self._new_ptr = 0
+            return
+        if self._role == 'reg_ptr':
+            self._new_ptr = (self._new_ptr << 8) | byte
+            self._addr_left -= 1
+            if self._addr_left == 0:
+                self.pointer = (self._blk | self._new_ptr) % self.size
+                self._role = 'write_data'
+                self._pending = []
+            return
+        if self._role == 'write_data':
+            self._pending.append((self.pointer, byte))
+            # roll over inside the page
+            pg = self.pointer - self.pointer % self.page
+            self.pointer = pg + (self.pointer + 1 - pg) % self.page
+
+    def _ack_decision(self, cycle):
+        if self._just_addressed:
+            return self._will_ack_addr
+        return self._role in ('reg_ptr', 'write_data')
+
+    def _load_out_byte(self):
+        self._out_bits = [(self.regs[self.pointer] >> i) & 1 for i in range(7, -1, -1)]
+        self.pointer = (self.pointer + 1) % self.size
+
+    def _on_stop(self, cycle):
+        super()._on_stop(cycle)
+        if self._role == 'write_data' and self._pending:
+            for a, b in self._pending:
+                self.regs[a] = b
+            self._pending = []
+            self.busy_until = cycle + self.t_wr_cycles
+            self.writes += 1
+        self._role = None
+
+
+class StuckSda:
+    """A target that lost sync and holds SDA low until it has seen
+    `release_after` SCL falling edges (the situation UM10204 bus clear
+    addresses)."""
+
+    def __init__(self, scl, sda, release_after=5):
+        self.scl, self.sda = scl, sda
+        self.left = release_after
+        self._prev = 1
+
+    def step(self, cycle, nets):
+        s = nets.get(self.scl, 1)
+        if self._prev == 1 and s == 0 and self.left:
+            self.left -= 1
+        self._prev = s
+        return {self.sda: 0} if self.left else {}

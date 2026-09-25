@@ -16,7 +16,7 @@ from cocotb.clock import Clock  # noqa: E402
 from cocotb.triggers import ClockCycles, FallingEdge, ReadOnly  # noqa: E402
 
 from tempo import isa  # noqa: E402
-from tempo.harness import Harness, net_of_input, net_of_output  # noqa: E402
+from tempo.harness import Harness, net_of_input, net_of_output, pads_to_index  # noqa: E402
 
 
 class Mismatch(AssertionError):
@@ -87,7 +87,7 @@ class Lockstep:
         d.uio_in.value = pads & 0xFF
         d.ui_in.value = pads >> 8
         await ReadOnly()
-        uo = int(d.uo_out.value)
+        uo = pads_to_index(int(d.uo_out.value))
         uio = int(d.uio_out.value)
         oe = int(d.uio_oe.value)
         rtl_val = uo << 8 | uio
@@ -155,3 +155,27 @@ class Lockstep:
     async def boot(self, limit=400000):
         ok = await self.run_until(lambda: not self.h.host.busy, limit)
         assert ok, "host transactions did not finish"
+
+    async def mbox_write(self, words, limit=400000):
+        """Write words to H2T, resending whatever the port did not take
+        (the byte after the command is the free space it accepted)."""
+        words = list(words)
+        while words:
+            t = self.h.host.mbox_write(words[:4])
+            await self.boot(limit)
+            words = words[min(t.rx[1] & 7, len(words[:4])):]
+            if words:
+                await self.run(40)
+
+    async def mbox_read(self, n, limit=400000):
+        """Read n words from T2H (the byte after the command is the count
+        the port hands out)."""
+        out = []
+        for _ in range(int(limit) // 200):
+            t = self.h.host.mbox_read(min(4, n - len(out)))
+            await self.boot(limit)
+            out += t.words(2)[:t.rx[1] & 7]
+            if len(out) >= n:
+                return out
+            await self.run(100)
+        raise AssertionError(f"only {len(out)} of {n} words: {out}")

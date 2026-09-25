@@ -53,7 +53,9 @@ module tt_um_dom0nom_protoemu (
 
   assign uio_out = out_val[7:0];
   assign uio_oe  = out_oe[7:0];
-  assign uo_out  = out_val[15:8];
+  // Output index 15 is the host MISO. It goes to uo[3], the RP2350's SPI0 RX
+  // pin on the demo board, so output index 11 takes uo[7].
+  assign uo_out  = {out_val[11], out_val[14:12], out_val[15], out_val[10:8]};
 
   wire _unused = &{ena, out_oe[15:8], 1'b0};
 endmodule

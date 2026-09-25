@@ -47,6 +47,7 @@ class Thread:
     stalls: int = 0
     late: int = 0
     ldi_phase: int = 0  # ldi takes two slots
+    sti_phase: int = 0  # so does sti: its second fetch slot writes IMEM
 
     def flags(self) -> int:
         return self.z | self.c << 1 | self.n << 2
@@ -85,6 +86,7 @@ class Chip:
         self.trace_retires = True
         self.illegal = []
         self.pinconflict = False
+        self.sti_data = [0, 0]  # store data, one latch per thread parity
 
     # ---- host-side helpers (transaction level; the SPI port model wraps these)
     def load(self, words, base=0):
@@ -126,7 +128,9 @@ class Chip:
         # or given to the host if that thread is halted.
         ft = self.threads[(self.now + 2) % isa.NTHREADS]
         ft.fetch_ok = ft.run
-        if ft.run:
+        if ft.run and ft.sti_phase:
+            self.imem[ft.ldi_addr] = self.sti_data[ft.tid & 1]
+        elif ft.run:
             ft.ir = self.imem[(ft.ldi_addr if ft.ldi_phase else ft.pc) % isa.IMEM_WORDS]
         self.host.imem_slot(ft.tid)
         self.host.clock()
@@ -162,6 +166,11 @@ class Chip:
         def stall():
             t.stalls += 1
 
+        if t.sti_phase:
+            # second slot of sti: the fetch slot wrote IMEM
+            t.sti_phase = 0
+            t.pc = (t.pc + 1) % isa.IMEM_WORDS
+            return self.commit(t, pc0, t.ldi_word, None)
         if t.ldi_phase:
             # second slot of ldi: the fetched word is the data
             t.ldi_phase = 0
@@ -224,6 +233,13 @@ class Chip:
                 wr = (i.rd, int(f"{a:016b}"[::-1], 2))
             elif name == "swab":
                 wr = (i.rd, ((a << 8) | (a >> 8)) & MASK16)
+            elif name == "sti":
+                # first slot: the thread's next fetch slot writes IMEM[rs] = rd
+                t.sti_phase = 1
+                t.ldi_addr = a % isa.IMEM_WORDS
+                t.ldi_word = w
+                self.sti_data[t.tid & 1] = d
+                return None
             elif name == "shli":
                 wr = (i.rd, (a << k) & MASK16)
                 if k:
@@ -234,7 +250,7 @@ class Chip:
                     t.c = (a >> (k - 1)) & 1
             elif name == "rori":
                 wr = (i.rd, ((a >> k) | (a << (16 - k))) & MASK16)
-            if wr is not None and name not in ("mov",):
+            if wr is not None and name not in ("mov", "sti"):
                 self.set_nz(t, wr[1])
         elif name == "li":
             wr = (i.rd, i.imm & MASK16)

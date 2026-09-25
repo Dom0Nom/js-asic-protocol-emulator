@@ -9,8 +9,21 @@ from .sim import Chip
 FW = os.path.join(os.path.dirname(__file__), "..", "..", "fw")
 
 
+# Output index 15 (host MISO) is on uo[3], the RP2350's SPI0 RX pin, so
+# output index 11 takes uo[7]. Inputs are not permuted.
+OUT_PAD = {11: 7, 15: 3}
+
+
 def net_of_output(i):
-    return f"uio{i}" if i < 8 else f"uo{i - 8}"
+    return f"uio{i}" if i < 8 else f"uo{OUT_PAD.get(i, i - 8)}"
+
+
+def pads_to_index(uo):
+    """Physical uo_out byte -> output index bits [15:8]."""
+    v = 0
+    for i in range(8, 16):
+        v |= ((uo >> OUT_PAD.get(i, i - 8)) & 1) << (i - 8)
+    return v
 
 
 def net_of_input(i):
@@ -22,7 +35,7 @@ class Harness:
                  boot="backdoor"):
         """boot: "backdoor" loads IMEM and starts threads directly; "host"
         loads and starts them through the host SPI port, like real silicon."""
-        self.prog = asm.assemble(src, FW if path is None else path)
+        self.prog = asm.assemble(src or "", FW if path is None else path)
         self.chip = chip or Chip()
         self.board = Board(clock_hz=clock_hz, pullups=set(pullups))
         self.drive_ui = {}  # host-driven dedicated inputs {index: level}

@@ -23,7 +23,7 @@ SYNC_LATENCY = 2  # two-flop input synchroniser
 # Register indices
 (CFG, PINS, LEN0, LEN1, SYM0, SYM1, FRAC, CR, CF, SAMP, PAT, PATE,
  CRC, POLY, CAP, MODE) = range(16)
-REG_BITS = [14, 16, 16, 16, 16, 16, 8, 13, 13, 13, 16, 16, 16, 16, 16, 12]
+REG_BITS = [14, 16, 16, 16, 16, 16, 8, 13, 13, 13, 16, 16, 16, 16, 16, 14]
 
 # CFG bits
 C_MSB, C_DOD, C_COD, C_CEN, C_CPOL, C_STRETCH, C_NRZI, C_DIFF = range(8)
@@ -292,7 +292,10 @@ class Lane:
         if m_start:
             self.ev_start = self.set_start = 1
             self.stat |= 1 << S_START
-            self.regs[CAP] = now
+            if self.cur is None:
+                # CAP marks the match that can start a command; edges inside
+                # a running command (e.g. data bits) do not move it
+                self.regs[CAP] = now
         if m_stop:
             self.ev_stop = self.set_stop = 1
             self.stat |= 1 << S_STOP
@@ -303,6 +306,8 @@ class Lane:
             return
 
         self._m_start, self._prev_i = m_start, prev_i
+        prev_c = (pat8 >> 6) & 1
+        self._cedge = c != prev_c and ((bit(self.regs[MODE], 12) and c) or (bit(self.regs[MODE], 13) and not c))
         if self.cur is not None:
             self.run_cycle(i_, c, prev_i, m_stop)
         elif self.queue:
@@ -318,8 +323,22 @@ class Lane:
 
     # One cycle of a running command, at position (t, pre). Afterwards the
     # position is advanced to the next cycle and pin levels for it are set.
+    @property
+    def xclk(self):
+        return (self.regs[MODE] >> 12) & 3 != 0
+
     def run_cycle(self, i_, c_in, prev_i, m_stop):
         cmd = self.cur
+        if self.xclk and cmd.kind == "rx":
+            # external clock: sample I on the chosen C edge, no timeline
+            if self._cedge:
+                self.xclk_samples = getattr(self, "xclk_samples", 0) + 1
+                if self.take_sample(i_):
+                    return
+            if m_stop and self.cur is cmd:
+                self.push_rx(end=1)
+                self.finish_cmd()
+            return
         if self.frozen:
             if c_in:
                 self.frozen = False
@@ -411,7 +430,7 @@ class Lane:
         cmd = self.cur
         if cmd.kind == "rx" and self.rcount >= cmd.n and not self.destuff:
             self.push_rx(end=0)
-            if self.continuation_queued():
+            if self.continuation_queued() and not self.xclk:
                 # stay on the bit grid: run to the end of this slot
                 self.rx_complete = True
                 return False
@@ -471,7 +490,7 @@ class Lane:
         if self.queue and self.queue[0].kind in ("tx", "rx", "emit"):
             self.try_start()
         if self.cur is None:
-            self.hold_levels()
+            self.hold_levels(after_emit=cmd.kind == "emit")
 
     def apply_cfg(self, q):
         if q.kind == "lw":
@@ -625,10 +644,11 @@ class Lane:
                 self.c = [cl, 1]
             self.owned["c"] = True
 
-    def hold_levels(self):
-        """Idle: D holds, or is released with DREL; the clock returns to idle."""
+    def hold_levels(self, after_emit=False):
+        """Idle: D holds, or is released with DREL. After a coded slot the
+        clock returns to CPOL; after an emit it keeps the emitted level."""
         if self.cfg(C_DREL):
             self.d = [self.d[0], 0]
-        if self.cfg(C_CEN) and self.owned["c"]:
+        if self.cfg(C_CEN) and self.owned["c"] and not after_emit:
             cl = self.cfg(C_CPOL)
             self.c = [0, 1 - cl] if self.cfg(C_COD) else [cl, 1]
