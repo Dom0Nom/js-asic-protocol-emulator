@@ -50,7 +50,8 @@ module tempo_lane #(
     output wire [1:0]  d_o,         // {enable, level}
     output wire [1:0]  a_o,
     output wire [1:0]  c_o,
-    output wire [2:0]  owned_o      // {c, a, d}
+    output wire [2:0]  owned_o,     // {c, a, d}
+    output wire        running_o    // a command is in progress
 );
   localparam K_TX = 3'd0, K_RX = 3'd1, K_EMIT = 3'd2, K_LW = 3'd3, K_START = 3'd4;
   localparam SK_TX = 2'd0, SK_RX = 2'd1, SK_EMIT = 2'd2;
@@ -709,6 +710,7 @@ module tempo_lane #(
   assign a_o = a;
   assign c_o = c;
   assign owned_o = owned;
+  assign running_o = cur_v;
 
   wire _unused = &{in_d, in_a, h_reg, 1'b0};
 endmodule

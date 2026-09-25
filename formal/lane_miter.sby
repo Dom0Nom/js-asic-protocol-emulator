@@ -1,0 +1,19 @@
+[tasks]
+bmc
+
+[options]
+bmc: mode bmc
+bmc: depth 60
+multiclock off
+
+[engines]
+bmc: smtbmc bitwuzla
+
+[script]
+read_verilog -formal -I../src tempo_lane.v
+read_verilog -formal -sv lane_miter.sv
+prep -top lane_miter
+
+[files]
+../src/tempo_lane.v
+lane_miter.sv

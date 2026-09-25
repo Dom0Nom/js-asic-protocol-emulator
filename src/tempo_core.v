@@ -155,7 +155,8 @@ module tempo_core (
           .rd_idx(lreg), .rd_data(l_rd[gi]), .status(l_status[gi]), .q_full(l_qfull[gi]),
           .idle(l_idle[gi]), .rx_avail(l_rxav[gi]), .rx_word(l_rxword[gi]), .rx_end(l_rxend[gi]),
           .rx_err(l_rxerr[gi]), .ev_start_o(l_evs[gi]), .ev_stop_o(l_eve[gi]), .cap_o(l_cap[gi]),
-          .pins_cfg(l_pins[gi]), .d_o(l_d[gi]), .a_o(l_a[gi]), .c_o(l_c[gi]), .owned_o(l_owned[gi])
+          .pins_cfg(l_pins[gi]), .d_o(l_d[gi]), .a_o(l_a[gi]), .c_o(l_c[gi]), .owned_o(l_owned[gi]),
+          .running_o()
       );
     end
   endgenerate
