@@ -273,6 +273,8 @@ module tempo_lane #(
     // external clock receive (MODE[13:12]: sample I on C rising / falling)
     cedge = (in_c != prev4[2]) && ((mode[12] && in_c) || (mode[13] && !in_c));
     xrx = (mode[13:12] != 2'd0) && cur_kind == K_RX;
+    // a sampling edge with no receive running or queued: bits are lost, say so
+    if (mode[13:12] != 2'd0 && !mode[7] && cedge && !cur_v && !q0_v) stat_n[3] = 1'b1;
     m_start = (pat[15:8] != 8'd0) && ((pat8 & pat[15:8]) == (pat[7:0] & pat[15:8]));
     m_stop = (pate[15:8] != 8'd0) && ((pat8 & pate[15:8]) == (pate[7:0] & pate[15:8]));
     if (m_start) begin

@@ -312,6 +312,8 @@ class Lane:
         self._m_start, self._prev_i = m_start, prev_i
         prev_c = (pat8 >> 6) & 1
         self._cedge = c != prev_c and ((bit(self.regs[MODE], 12) and c) or (bit(self.regs[MODE], 13) and not c))
+        if self.xclk and self._cedge and self.cur is None and not self.queue:
+            self.stat |= 1 << S_UNDER  # a sampling edge with no receive to take it: bits lost
         if self.cur is not None:
             self.run_cycle(i_, c, prev_i, m_stop)
         elif self.queue:

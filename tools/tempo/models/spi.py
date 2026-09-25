@@ -350,3 +350,64 @@ class SpiNorFlash(SpiSlave):
                 self.busy_until = cycle + self.t_se
                 self.erases += 1
             self.wel = False
+
+
+class SpiMaster:
+    """Bit-level SPI controller for monitor tests: another device on the bus
+    (e.g. an MCU reading its flash). `transfer(data)` queues one CS-framed
+    transaction; MISO bytes land in `received`. Mode 0 or 3; `half` is half
+    an SCK period in cycles."""
+
+    def __init__(self, sck, mosi, miso, cs, mode=0, half=10, gap=20):
+        self.sck, self.mosi, self.miso, self.cs = sck, mosi, miso, cs
+        self.cpol = mode >> 1
+        self.half, self.gap = half, gap
+        self.q = []
+        self.received = []
+        self.lv = {sck: self.cpol, mosi: 0, cs: 1}
+        self.gen = None
+        self._nets = [{}]
+
+    def transfer(self, data):
+        self.q.append(bytes(data))
+
+    @property
+    def busy(self):
+        return bool(self.q) or self.gen is not None
+
+    def _seq(self, data):
+        h = self.half
+        lead = 1 - self.cpol  # leading (sampling) edge level
+        self.lv[self.cs] = 0
+        for _ in range(h):
+            yield
+        got = bytearray()
+        for byte in data:
+            v = 0
+            for i in range(8):
+                self.lv[self.mosi] = (byte >> (7 - i)) & 1
+                for _ in range(h):
+                    yield
+                self.lv[self.sck] = lead
+                v = (v << 1) | self._nets[0].get(self.miso, 0)
+                for _ in range(h):
+                    yield
+                self.lv[self.sck] = self.cpol
+            got.append(v)
+        for _ in range(h):
+            yield
+        self.lv[self.cs] = 1
+        self.received.append(bytes(got))
+        for _ in range(self.gap):
+            yield
+
+    def step(self, cycle, nets):
+        self._nets[0] = nets
+        if self.gen is None and self.q:
+            self.gen = self._seq(self.q.pop(0))
+        if self.gen is not None:
+            try:
+                next(self.gen)
+            except StopIteration:
+                self.gen = None
+        return dict(self.lv)

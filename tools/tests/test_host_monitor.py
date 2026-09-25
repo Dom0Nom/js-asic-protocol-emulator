@@ -36,3 +36,29 @@ def test_i2c_monitor_decodes_live_bus():
     assert tx[1]["time"] > tx[0]["time"] and not mon.lost
     assert tgt.regs[0x10] == 0x77
     assert not h.board.contention
+
+
+def test_spi_monitor_sees_mcu_reading_its_flash():
+    from tempo.models.spi import SpiMaster, SpiNorFlash
+    from tempo_host.monitor import SpiMonitor
+    h = Harness(None, boot="host")
+    mem = bytearray(range(256)) * 16
+    h.attach(SpiNorFlash("uio2", "uio0", "uio1", "uio3", mode=0, mem=mem, size=4096))
+    mcu = h.attach(SpiMaster("uio2", "uio0", "uio1", "uio3", mode=0, half=20))  # 1.25 MHz, the measured limit
+    link = Link(model_transport(h))
+    mon = SpiMonitor(link, mosi=0, miso=1, sck=2, cs=3, mode=0)
+    h.run(200)
+    mcu.transfer(b"\x9f\x00\x00\x00")
+    mcu.transfer(b"\x03\x00\x01\x20" + b"\x00" * 6)
+    got = []
+    while mcu.busy:
+        got += mon.poll()
+        h.run(400)
+    h.run(3000)
+    got += mon.poll()
+    assert [bytes(t["mosi"][:4]) for t in got] == [b"\x9f\x00\x00\x00", b"\x03\x00\x01\x20"], got
+    assert bytes(got[0]["miso"][1:4]) == b"\xef\x40\x18"
+    assert bytes(got[1]["miso"][4:]) == bytes(mem[0x120:0x126])
+    assert [t["count"] for t in got] == [4, 10] and not mon.lost
+    assert got[1]["time"] > got[0]["time"]
+    link.check()  # no UNDER (missed SCK edges) or OVERRUN

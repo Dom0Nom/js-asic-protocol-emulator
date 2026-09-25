@@ -94,3 +94,74 @@ class I2cMonitor:
                 cur["stop"] = True
                 cur = None
         return txs
+
+
+class SpiMonitor:
+    """Passive SPI monitor. Records MOSI and MISO bytes of each CS-framed
+    transaction with the CS-fall time; with keep=K only the first K bytes of
+    each transaction are recorded (the rest are counted), which is what
+    matters for "which commands and addresses did the MCU send", at a
+    higher SCK."""
+
+    def __init__(self, link, mosi=0, miso=1, sck=2, cs=3, mode=0, keep=0xFFFF, filter_cycles=0):
+        self.link = link
+        edge = 1 if mode in (0, 3) else 2  # MODE.XCLK: 1 rising, 2 falling
+        link.load(IMAGES["spimon"], {
+            "mosi": cs << 12 | sck << 8 | mosi << 4 | NOPIN,
+            "miso": cs << 12 | sck << 8 | miso << 4 | NOPIN,
+            "cs": NOPIN << 12 | NOPIN << 8 | cs << 4 | NOPIN,
+            "edge": edge << 12 | (filter_cycles & 7) << 9,
+            "keep": keep,
+        })
+        self.clock = _Clock()
+        self.lost = 0
+        self.overruns = 0  # the chip reported an edge FIFO overrun: bytes were missed
+        self._pend = None
+        self._cur = None
+        self.done = []
+
+    def poll(self, max_words=64):
+        """Returns completed transactions: dicts with the CS-fall time,
+        mosi and miso bytes (recorded ones), the total byte count and any
+        bits of a cut-off byte."""
+        for _ in range(max_words // 4 + 1):
+            ws = self.link.get_some()
+            if not ws:
+                break
+            for w in ws:
+                if self._pend is not None:
+                    kind = self._pend
+                    self._pend = None
+                    if kind == "count":
+                        if self._cur is not None:
+                            self._cur["count"] = w
+                            self.done.append(self._cur)
+                        self._cur = None
+                        continue
+                    t = self.clock(w)
+                    if kind == "start":
+                        self._cur = {"time": t, "mosi": bytearray(), "miso": bytearray(),
+                                     "count": None, "partial_bits": 0}
+                    continue
+                top = w >> 12
+                if top == 0x8:
+                    self._pend = "start"
+                elif top == 0x9:
+                    self._pend = "mark"
+                elif top == 0xA:
+                    if self._cur is None:
+                        self._cur = {"time": None, "mosi": bytearray(), "miso": bytearray(),
+                                     "count": None, "partial_bits": 0}
+                    self._cur["partial_bits"] = w & 31
+                    self._pend = "count"
+                elif top == 0xC:
+                    self.lost += w & 0xFFF
+                elif self._cur is not None:
+                    (self._cur["miso"] if w >> 8 else self._cur["mosi"]).append(w & 0xFF)
+        for st in self.link.errors_seen:
+            for e in st.errors():
+                if "OVERRUN" in e:
+                    self.overruns += 1
+        self.link.errors_seen = []
+        out, self.done = self.done, []
+        return out
