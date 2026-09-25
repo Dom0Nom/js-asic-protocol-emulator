@@ -21,7 +21,7 @@ def i2c_run(cmds, mode="standard", stretch=0, address=0x50, nack_after=None):
         h.run(50)
         while h.chip.t2h:
             replies.append(h.chip.t2h.popleft())
-        lane = h.chip.lanes[3]
+        lane = h.chip.lanes[2]
         if not pending and not h.chip.h2t and lane.cur is None and not lane.queue:
             break
     h.run(slot * 2)

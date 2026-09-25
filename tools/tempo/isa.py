@@ -7,7 +7,8 @@ header (`src/tempo_isa.vh`) all come from the tables in this module.
 from dataclasses import dataclass
 
 NREGS = 8
-NLANES = 4
+NLANES = 4  # lane field range in the encoding
+LANES = 3  # lanes built (lane 3 was cut for area, docs/decisions.md); ops on lane 3 are illegal
 NTHREADS = 4
 IMEM_WORDS = 1024
 SCRATCH_WORDS = 8

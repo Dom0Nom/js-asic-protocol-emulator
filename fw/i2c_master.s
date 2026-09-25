@@ -1,4 +1,4 @@
-; I2C master on lane 3, driven by host mailbox commands.
+; I2C master on lane 2, driven by host mailbox commands.
 ; Needs I2C_SLOT (cycles per bit). SDA uio4 (D and I), SCL uio5 (C), both
 ; open drain with external pull-ups. Clock stretching is honoured on every
 ; SCL release, including START, repeated START and STOP.
@@ -22,20 +22,20 @@
         .entry 3, i2c_main
 i2c_main:
         lc   r1, NOPIN << 12 | (UIO0 + 5) << 8 | (UIO0 + 4) << 4 | (UIO0 + 4)
-        lw   l3, pins, r1
+        lw   l2, pins, r1
         lc   r1, I2C_SLOT
-        lw   l3, len0, r1
-        lw   l3, len1, r1
+        lw   l2, len0, r1
+        lw   l2, len1, r1
         lc   r1, SYM_NRZ1
-        lw   l3, sym1, r1
+        lw   l2, sym1, r1
         lc   r1, I2C_CR
-        lw   l3, cr, r1
+        lw   l2, cr, r1
         lc   r1, I2C_CF
-        lw   l3, cf, r1
+        lw   l2, cf, r1
         lc   r1, I2C_SAMP
-        lw   l3, samp, r1
+        lw   l2, samp, r1
         lc   r1, CFG_MSB | CFG_DOD | CFG_COD | CFG_CEN | CFG_STRETCH
-        lw   l3, cfg, r1
+        lw   l2, cfg, r1
         li   r2, 0xFF
 
 cmd:    hget r4
@@ -54,27 +54,27 @@ cmd:    hget r4
         bra  cmd
 
 start:  li   r1, SDA_HI | SCL_LO     ; release SDA while SCL is low (repeated START setup)
-        emit l3, r1
+        emit l2, r1
         li   r1, SDA_HI | SCL_HI     ; release SCL, waits out any stretching
-        emit l3, r1
+        emit l2, r1
         li   r1, SDA_LO | SCL_HI     ; SDA falls while SCL high: START
-        emit l3, r1
+        emit l2, r1
         li   r1, SDA_LO | SCL_LO
-        emit l3, r1
+        emit l2, r1
         bra  cmd
 
 stop:   li   r1, SDA_LO | SCL_LO
-        emit l3, r1
+        emit l2, r1
         li   r1, SDA_LO | SCL_HI
-        emit l3, r1
+        emit l2, r1
         li   r1, SDA_HI | SCL_HI     ; SDA rises while SCL high: STOP
-        emit l3, r1
+        emit l2, r1
         bra  cmd
 
 write:  shli r4, r4, 1
         ori  r4, 1                   ; release SDA in the ACK slot
-        tx   l3, r4, 9, x
-        rx   r5, l3
+        tx   l2, r4, 9, x
+        rx   r5, l2
         andi r5, 1                   ; bit 0 of the echo is the ACK slot
         hput r5
         bra  cmd
@@ -84,8 +84,8 @@ read_ack:
         bra  read
 read_nack:
         li   r4, -1                  ; release all 9 bits: NACK
-read:   tx   l3, r4, 9, x
-        rx   r5, l3
+read:   tx   l2, r4, 9, x
+        rx   r5, l2
         shri r5, r5, 1
         and  r5, r5, r2
         hput r5

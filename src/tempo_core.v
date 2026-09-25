@@ -14,7 +14,9 @@
 
 `default_nettype none
 
-module tempo_core (
+module tempo_core #(
+    parameter NLANES = 3        // lanes built; ops on the others are illegal (lane 3 cut for area)
+) (
     input  wire        clk,
     input  wire        rst_n,
     input  wire [15:0] pins_in,     // synchronised inputs, index order of the spec
@@ -100,7 +102,8 @@ module tempo_core (
       (op == OP_ALU2 && fn6[5:4] == 2'b00 && fn6[3] && fn6[2:0] != 3'd0) ||
       (op == OP_J && ir[10]) ||
       (op == OP_SYS && fn6 > SYS_TSTAT) ||
-      (op == OP_LREG && ir[1:0] != 2'b00);
+      (op == OP_LREG && ir[1:0] != 2'b00) ||
+      ((op == OP_LREG || op == OP_TX || op == OP_LANE) && {30'd0, ln} >= NLANES);
 
   // ------------------------------------------------------------ lanes
   wire [15:0] l_rd [0:3];
@@ -147,6 +150,7 @@ module tempo_core (
   genvar gi;
   generate
     for (gi = 0; gi < 4; gi = gi + 1) begin : g_lane
+     if (gi < NLANES) begin : g_on
       wire sel = (ln == gi) && ex_commit_lane;
       tempo_lane #(.FULL(gi < 2 ? 1 : 0)) lane (
           .clk(clk), .rst_n(rst_n), .now(now), .pins_in(pins_in),
@@ -160,6 +164,13 @@ module tempo_core (
           .pins_cfg(l_pins[gi]), .d_o(l_d[gi]), .a_o(l_a[gi]), .c_o(l_c[gi]), .owned_o(l_owned[gi]),
           .running_o()
       );
+     end else begin : g_off
+      assign l_rd[gi] = 16'd0; assign l_status[gi] = 16'd0; assign l_qfull[gi] = 1'b0;
+      assign l_idle[gi] = 1'b1; assign l_rxav[gi] = 1'b0; assign l_rxword[gi] = 16'd0;
+      assign l_rxend[gi] = 1'b0; assign l_rxerr[gi] = 1'b0; assign l_evs[gi] = 1'b0;
+      assign l_eve[gi] = 1'b0; assign l_cap[gi] = 16'd0; assign l_pins[gi] = 16'hFFFF;
+      assign l_d[gi] = 2'd0; assign l_a[gi] = 2'd0; assign l_c[gi] = 2'd0; assign l_owned[gi] = 3'd0;
+     end
     end
   endgenerate
 

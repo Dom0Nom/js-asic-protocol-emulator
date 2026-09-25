@@ -1,4 +1,4 @@
-; I2C master on lane 3 (host image "i2c"). SDA is the lane's D and I pin,
+; I2C master on lane 2 (host image "i2c"). SDA is the lane's D and I pin,
 ; SCL its C pin, both open drain; external pull-ups required. Clock
 ; stretching is honoured on every SCL release, including START and STOP.
 ; Pins and timing come from the parameter block, patched by the host.
@@ -21,27 +21,27 @@
         .equ SCL_HI, E_C | E_CEN
 
         .entry 3, main
-main:   stop l3
+main:   stop l2
         lc   r0, P_PINS
         ldi  r1, [r0 + 0]
-        lw   l3, pins, r1
+        lw   l2, pins, r1
         ldi  r1, [r0 + 1]
-        lw   l3, len0, r1
-        lw   l3, len1, r1
+        lw   l2, len0, r1
+        lw   l2, len1, r1
         ldi  r1, [r0 + 2]
-        lw   l3, cr, r1
+        lw   l2, cr, r1
         ldi  r1, [r0 + 3]
-        lw   l3, cf, r1
+        lw   l2, cf, r1
         ldi  r1, [r0 + 4]
-        lw   l3, samp, r1
+        lw   l2, samp, r1
         ldi  r1, [r0 + 5]
-        lw   l3, mode, r1
+        lw   l2, mode, r1
         lc   r1, SYM_NRZ1
-        lw   l3, sym1, r1
+        lw   l2, sym1, r1
         lc   r1, CFG_MSB | CFG_DOD | CFG_COD | CFG_CEN | CFG_STRETCH
-        lw   l3, cfg, r1
+        lw   l2, cfg, r1
         li   r1, SDA_HI | SCL_HI       ; bus idle, both released
-        emit l3, r1
+        emit l2, r1
         li   r2, 0xFF
 
 cmd:    hget r4
@@ -64,7 +64,7 @@ cmd:    hget r4
         bra  cmd
 
 c_start:
-        stat r1, l3                    ; clear sticky flags for this transaction
+        stat r1, l2                    ; clear sticky flags for this transaction
         call start
         bra  cmd
 c_stop: call stop
@@ -85,7 +85,7 @@ c_rnack:
 
 c_probe:
         mov  r6, r4
-        stat r1, l3
+        stat r1, l2
         call start
         mov  r4, r6
         call wbyte                     ; r5 = ACK bit
@@ -102,16 +102,16 @@ p_stop: call stop
 c_recover:
         ldi  r6, [r0 + 6]              ; P_SDAMASK
         li   r3, 0                     ; pulses so far
-rc_chk: wait l3, idle
+rc_chk: wait l2, idle
         ior  r1
         and  r1, r1, r6
         bne  rc_ok                     ; SDA high: released
         cmpi r3, 9
         beq  rc_fail
         li   r1, SDA_HI | SCL_LO
-        emit l3, r1
+        emit l2, r1
         li   r1, SDA_HI | SCL_HI       ; waits out stretching
-        emit l3, r1
+        emit l2, r1
         addi r3, 1
         bra  rc_chk
 rc_fail:
@@ -122,35 +122,35 @@ rc_ok:  call stop
 
 ; START or repeated START; clobbers r1
 start:  li   r1, SDA_HI | SCL_LO       ; release SDA while SCL is low
-        emit l3, r1
+        emit l2, r1
         li   r1, SDA_HI | SCL_HI       ; release SCL, waits out stretching
-        emit l3, r1
+        emit l2, r1
         li   r1, SDA_LO | SCL_HI       ; SDA falls while SCL high
-        emit l3, r1
+        emit l2, r1
         li   r1, SDA_LO | SCL_LO
-        emit l3, r1
+        emit l2, r1
         ret
 
 ; STOP; clobbers r1
 stop:   li   r1, SDA_LO | SCL_LO
-        emit l3, r1
+        emit l2, r1
         li   r1, SDA_LO | SCL_HI
-        emit l3, r1
+        emit l2, r1
         li   r1, SDA_HI | SCL_HI       ; SDA rises while SCL high
-        emit l3, r1
+        emit l2, r1
         ret
 
 ; write byte r4, r5 = ACK bit (0 ACK), flags from r5
 wbyte:  shli r4, r4, 1
         ori  r4, 1                     ; release SDA in the ACK slot
-        tx   l3, r4, 9, x
-        rx   r5, l3
+        tx   l2, r4, 9, x
+        rx   r5, l2
         andi r5, 1
         ret
 
 ; read byte with r4 = -2 (ACK) or -1 (NACK), r5 = byte
-rbyte:  tx   l3, r4, 9, x
-        rx   r5, l3
+rbyte:  tx   l2, r4, 9, x
+        rx   r5, l2
         shri r5, r5, 1
         and  r5, r5, r2
         ret

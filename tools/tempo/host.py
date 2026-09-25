@@ -182,6 +182,8 @@ class HostPort:
             if i == 4:
                 return sum(ch.threads[t].late << t for t in range(4))
             if 5 <= i <= 8:
+                if i - 5 >= len(ch.lanes):
+                    return 0
                 lane = ch.lanes[i - 5]
                 st = lane.status()
                 return (st >> 3) & 0x7F | (st & 1) << 7

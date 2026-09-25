@@ -56,7 +56,8 @@ def thread_block(rng, tid, n):
 
 def random_insn(rng, tid, k, n, lab):
     r = lambda: f"r{rng.randint(0, 7)}"  # noqa: E731
-    lane = f"l{rng.randint(0, 3)}"
+    # lanes 0-2 exist; lane 3 was cut, so its ops are illegal (rarely drawn)
+    lane = f"l{rng.randint(0, 2) if rng.random() < 0.98 else 3}"
     fwd = lab(min(n, k + rng.randint(1, 4)))
     c = rng.random()
     if c < 0.22:
@@ -85,7 +86,7 @@ def random_insn(rng, tid, k, n, lab):
     if c < 0.615:
         # guarded blocking ops: wait for the source with a deadline, then
         # take it only if it is ready (rx, hget, wev would block forever)
-        k = rng.randint(0, 3)
+        k = rng.randint(0, 2)
         src, take = rng.choice([
             (1 << k, f"rx {r()}, l{k}"),
             (1 << 8, f"hget {r()}"),

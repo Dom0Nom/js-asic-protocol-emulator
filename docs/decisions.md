@@ -48,7 +48,7 @@ A fresh-context reviewer attacked the first draft (27 findings: 5 critical, 19 m
 
 ### Cuts and gates
 
-Cut, in this order if more is needed: 10BASE-T becomes a simulated TX waveform only; external-clock lane mode removed (done); lanes 2-3 lite (done); data SRAM macro replaced by latches (done); CAN limited to TX, arbitration and best-effort RX; next, drop lite lanes to one.
+Cut, in this order if more is needed: 10BASE-T becomes a simulated TX waveform only; external-clock lane mode removed (done; a receive-only external clock came back in the use-case batch below); lanes 2-3 lite (done); data SRAM macro replaced by latches (done); CAN limited to TX, arbitration and best-effort RX; drop lite lanes to one (done 2026-09-26, see below); next: latch-based lane configuration registers, then a latch register file.
 
 Gates: SRAM harden clean and a one-lane synthesis number before the full core; UART, SPI and I2C master in RTL lockstep by the end of week 5 (2026-10-30); USB low-speed device enumerating in simulation by week 9 (2026-11-27) or USB is dropped; feature freeze in week 12 (2026-12-18).
 
@@ -87,3 +87,11 @@ Building the bench-tool use cases (`notes/use-case-plan.md`) and a fresh-context
 - Mailbox commands return the count the port will take or give and never exceed it, plus an error-summary bit, and the status command reports each lane's flags (bug 19). The host never needs a status read to stay correct, and reads one only when the error bit is set.
 
 Not taken from the critic review, with reasons: a separate IMEM read/write port for threads (the fetch-slot reuse above gives the same buffering at a fraction of the area); a channel-tagged mailbox in hardware (a firmware dispatcher does it, see the resident image); a CMSIS-DAP shim on the RP2350 (out of scope for silicon; the host library is the API, and a PC transport over the RP2350's USB serial is planned).
+
+## Lane 3 cut for routability, 2026-09-26
+
+The first full-design harden (commit 0e3dfa5, four lanes, 30,874 cells after placement, 54% utilization) did not route. The TT IHP flow routes signals on Metal2 to Metal4 only, so Metal3 is the single horizontal layer: global routing ended with Metal3 at 86% and 1,933 overflowed edges out of 2,081, and detailed routing went 32,154 / 16,593 / 15,902 violations over its first three iterations at about 35 minutes each. It was stopped there.
+
+Chosen: the next step of the cut order, dropping lite lane 3. `tempo_core` synthesis: 24,742 to 20,840 cells, 364.9k to 309.7k um² (-15%). The ISA keeps the 2-bit lane field; an instruction on lane 3 is illegal (the thread halts and the host status reports it), so firmware can never silently target a missing lane. Every use case fits in three lanes: I2C moved to lane 2, the logic analyser's trigger moved to lane 0's A pin (patterns stay active in capture mode), and the three-lane concurrent cases (UART + I2C, JTAG, monitors) keep working.
+
+Considered: lowering placement density (not possible below the actual 54% utilization), routing on Metal1 (more horizontal capacity, but pin-access and precheck risk), latch-based configuration and register file (kept as the next levers; they trade area for timing and verification effort).

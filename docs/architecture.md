@@ -239,7 +239,7 @@ LANE sub-operations:
 
 ### Lanes
 
-Lanes 0 and 1 are full lanes. Lanes 2 and 3 are lite: their NRZI, stuffing, CRC, resync and relative-symbol features are absent and read as 0.
+Lanes 0 and 1 are full lanes. Lane 2 is lite: its NRZI, stuffing, CRC, resync and relative-symbol features are absent and read as 0. Lane 3 was cut for routability (`docs/decisions.md`): the lane field keeps 2 bits, and any instruction that names lane 3 is illegal.
 
 Registers (`lr` reads the current value; `lw` goes through the command queue):
 

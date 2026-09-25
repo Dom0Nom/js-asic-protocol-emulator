@@ -72,7 +72,7 @@ class Chip:
         self.imem = [0] * isa.IMEM_WORDS
         self.scratch = [0] * isa.SCRATCH_WORDS
         self.threads = [Thread(t) for t in range(isa.NTHREADS)]
-        self.lanes = [Lane(i, self) for i in range(isa.NLANES)]
+        self.lanes = [Lane(i, self) for i in range(isa.LANES)]
         self.host = HostPort(self)
         self.gout = 0
         self.goe = 0
@@ -177,7 +177,7 @@ class Chip:
             r[t.ldi_rd] = t.ir
             t.pc = (t.pc + 1) % isa.IMEM_WORDS
             return self.commit(t, pc0, t.ldi_word, (t.ldi_rd, t.ir))
-        if name == "ill":
+        if name == "ill" or (i.op in (isa.OP_LREG, isa.OP_TX, isa.OP_LANE) and i.lane >= isa.LANES):
             self.illegal.append((self.now, t.tid, t.pc, w))
             t.run = False
             t.illegal = True
