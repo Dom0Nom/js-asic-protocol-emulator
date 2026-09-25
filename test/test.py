@@ -87,3 +87,28 @@ async def test_i2c_write_read_with_stretching(dut):
     assert rep.words(2)[:4] == [0, 0, 0, 0]
     assert tgt.regs[0x10] == 0x5A
     assert not tgt.violations, tgt.violations[:4]
+
+
+@cocotb.test()
+async def test_usb_ls_rx_and_tx(dut):
+    from tempo.models.usb_ls import UsbLsReceiver, UsbLsTransmitter
+    ls = Lockstep(dut, '.include "usb_ls_phy.s"\n', pullups={"uio6"})
+    await ls.start()
+    await ls.boot()
+    await ls.run(300)
+    tx = ls.attach(UsbLsTransmitter("uio7", "uio6", bit_rate_error=0.015))
+    tx.send_data("DATA1", bytes([0xFF, 0xFF, 0x7E, 0x00, 0x81]))
+    await ls.run(34 * 90)
+    got = ls.h.host.mbox_read(6)  # 9 bytes in 5 words, then the end word
+    await ls.boot()
+    words = got.words(2)
+    b = [x for w in words[:5] for x in (w & 0xFF, w >> 8)][:9]
+    assert b[:7] == [0x80, 0x4B, 0xFF, 0xFF, 0x7E, 0x00, 0x81], [hex(w) for w in words]
+    assert words[5] == 0xE000 | 0x100 | 9 << 4, [hex(w) for w in words]  # residual ok, 9 bytes
+    # answer with ACK through lane 0; the model checks the waveform
+    rx = ls.attach(UsbLsReceiver("uio7", "uio6"))
+    ls.h.host.mbox_write([0xD2])  # ACK PID byte, no data, no CRC
+    await ls.boot()
+    await ls.run(34 * 30)
+    assert [p.pid for p in rx.packets][-1] == "ACK", (rx.packets, rx.errors)
+    assert not rx.errors
