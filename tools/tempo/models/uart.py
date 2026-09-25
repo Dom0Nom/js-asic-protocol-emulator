@@ -130,14 +130,28 @@ class UartRx:
         self._in_frame = False
 
     def _measure_period(self):
+        # Round each adjacent-edge gap to its own nearest bit-slot count
+        # rather than rounding the whole frame's span at once: dividing
+        # the total span by one rounded total-slot count only tolerates
+        # drift until it accumulates past half a bit period over the
+        # whole frame, while rounding gap by gap only needs each
+        # individual gap's drift to stay under half a bit period, which
+        # is far more forgiving for a badly mismatched baud rate.
         edges = self._edges
         if len(edges) < 2:
             return None
-        span = edges[-1][0] - edges[0][0]
-        slots = round(span / self.cycles_per_bit)
-        if slots <= 0:
+        total_span = 0
+        total_slots = 0
+        for (c0, _), (c1, _) in zip(edges, edges[1:]):
+            gap = c1 - c0
+            slots = round(gap / self.cycles_per_bit)
+            if slots <= 0:
+                continue
+            total_span += gap
+            total_slots += slots
+        if total_slots == 0:
             return None
-        return span / slots
+        return total_span / total_slots
 
 
 class UartTx(object):

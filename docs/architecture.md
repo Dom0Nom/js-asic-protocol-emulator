@@ -176,7 +176,7 @@ After the host sets a thread's run bit in cycle `c`, the thread first executes i
 
 ### Instruction encoding
 
-16-bit words. `rd`, `rs`, `rt` are 3-bit register fields, `L` a 2-bit lane. `simm9` is sign extended. Branch targets are `PC + 1 + offset`. Unlisted encodings are illegal: the thread halts and the host status reports it.
+16-bit words. Register fields only ever sit at `[11:9]`, `[8:6]` or `[5:3]`, so the register file needs two read ports. `rd`, `rs`, `rt` are 3-bit register fields, `L` a 2-bit lane. `simm9` is sign extended. Branch targets are `PC + 1 + offset`. Unlisted encodings are illegal: the thread halts and the host status reports it.
 
 | `[15:12]` | Mnemonic | Fields | Operation |
 |---|---|---|---|
@@ -194,8 +194,8 @@ After the host sets a thread's run bit in cycle `c`, the thread first executes i
 | B | SYS | `ra[11:9] rb[8:6] fn[5:0]` | see SYS table |
 | C | `lr`/`lw` | `L[11:10] reg[9:6] r[5:3] w[2] 00` | `w=0`: `lr r, L, reg` reads a lane register now. `w=1`: `lw L, reg, r` queues a register write (see lanes). |
 | D | `ldi rd, [rs + uimm6]` | `rd[11:9] rs[8:6] off[5:0]` | `rd = IMEM[(rs + off) mod 1024]`. Two slots. |
-| E | `tx`/`txcrc` | `L[11:10] rs[9:7] n1[6:3] fl[2:0]` | queue a transmit of `n1 + 1` bits of `rs`. `fl[0]` x: also sample I into the RX FIFO; `fl[1]` c: include the bits in the CRC; `fl[2]` s: send the lane CRC instead of `rs` (`txcrc`). Blocks while the queue is full. |
-| F | LANE | `L[11:10] r[9:7] sub[6:4] imm[3:0]` | see LANE table |
+| E | `tx`/`txcrc` | `L[11:10] n1[9:6] rs[5:3] fl[2:0]` | queue a transmit of `n1 + 1` bits of `rs`. `fl[0]` x: also sample I into the RX FIFO; `fl[1]` c: include the bits in the CRC; `fl[2]` s: send the lane CRC instead of `rs` (`txcrc`). Blocks while the queue is full. |
+| F | LANE | `L[11:10] imm[9:6] r[5:3] sub[2:0]` | see LANE table |
 
 SYS functions:
 
@@ -293,7 +293,7 @@ CRC step for bit `b`: LSB first, `crc = (crc >> 1) ^ (POLY if (crc ^ b) & 1)`; M
 
 ### Host port
 
-SPI mode 0, MSB first, `HCS_N` frames a transaction, `HSCK` at most `clk / 10`. The first byte is a command; multi-byte values are big endian.
+SPI mode 0, MSB first, `HCS_N` frames a transaction, `HSCK` at most `clk / 12`. MISO moves to the next bit 3 to 5 clock cycles after each rising `HSCK` edge (synchroniser, logic, output register), so the host sees the bit it samples on a rising edge for a whole SCK period and hold time is at least 3 clock cycles. The first byte is a command; multi-byte values are big endian.
 
 | Cmd | Name | Payload |
 |---|---|---|

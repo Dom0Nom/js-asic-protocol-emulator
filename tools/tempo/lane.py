@@ -335,9 +335,8 @@ class Lane:
                     self.frozen_done = True
                     return
             if self.slot_sample and self.t == self.regs[SAMP]:
-                self.take_sample(i_)
-                if self.cur is None:
-                    return
+                if self.take_sample(i_):
+                    return  # the command ended; a follow-on command starts at t = 0
         # Stop pattern ends a receive early
         if m_stop and cmd.kind == "rx":
             self.push_rx(end=1)
@@ -362,6 +361,7 @@ class Lane:
             self.set_levels()
 
     def take_sample(self, level):
+        """Returns True when this sample completed the receive command."""
         cmd = self.cur
         if self.slot_kind == "tx":  # echo (tx x) and arbitration
             if bit(self.regs[MODE], 8) and self.d[1] == 0 and level == 0 and not self.tx_last:
@@ -382,7 +382,7 @@ class Lane:
                     self.stat |= 1 << S_STUFFERR
                 self.rrun = 1 if self.cfg(C_STUFFANY) else int(x == 1)
                 self.rlast = x
-                return
+                return False
             if self.cfg(C_STUFFANY):
                 self.rrun = self.rrun + 1 if x == self.rlast else 1
             else:
@@ -400,6 +400,8 @@ class Lane:
         if cmd.kind == "rx" and self.rcount >= cmd.n and not self.destuff:
             self.push_rx(end=0)
             self.finish_cmd()
+            return True
+        return False
 
     def push_rx(self, end):
         self.rx_new.append((self.rword, self.rcount, end, self.rerr))

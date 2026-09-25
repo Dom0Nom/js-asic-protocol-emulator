@@ -69,3 +69,17 @@ def test_waitt_until_time():
     """)
     r = c.threads[0].regs
     assert 4 <= r[2] - r[1] < 8  # waitt releases in [0, 4), then one more slot
+
+
+def test_ldi_reads_imem_in_two_slots():
+    c, p = run("""
+        li   r1, 0
+        now  r3
+        ldi  r2, [r1 + tbl]
+        now  r4
+        halt
+    tbl: .word 0xBEEF
+    """)
+    r = c.threads[0].regs
+    assert r[2] == 0xBEEF
+    assert r[4] - r[3] == 12  # ldi takes two slots

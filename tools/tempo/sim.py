@@ -15,6 +15,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from . import isa
+from .host import HostPort
 from .lane import Lane
 
 MASK16 = 0xFFFF
@@ -35,7 +36,13 @@ class Thread:
     c: int = 0
     n: int = 0
     run: bool = False
-    start_at: int = -1  # first cycle it may execute after being started
+    step: bool = False  # host single step: halt again after one commit
+    illegal: bool = False
+    fetch_ok: bool = False  # fetched in its fetch slot while running
+    ir: int = 0  # word read from IMEM in the fetch slot
+    ldi_addr: int = 0
+    ldi_rd: int = 0
+    ldi_word: int = 0  # trace only
     retired: int = 0
     stalls: int = 0
     late: int = 0
@@ -65,6 +72,7 @@ class Chip:
         self.scratch = [0] * isa.SCRATCH_WORDS
         self.threads = [Thread(t) for t in range(isa.NTHREADS)]
         self.lanes = [Lane(i, self) for i in range(isa.NLANES)]
+        self.host = HostPort(self)
         self.gout = 0
         self.goe = 0
         self.ev = 0
@@ -84,12 +92,11 @@ class Chip:
             self.imem[base + i] = w & MASK16
 
     def start(self, tid, pc=None):
-        """Host start command taking effect at the current cycle's edge."""
+        """Backdoor start: the run bit is set from the next cycle on."""
         t = self.threads[tid]
         if pc is not None:
             t.pc = pc
         t.run = True
-        t.start_at = self.now + 3
 
     # ---- pins
     @property
@@ -99,7 +106,7 @@ class Chip:
 
     def pad_outputs(self):
         """(value, enable) for the 16 output indices during this cycle."""
-        val, oe = self.gout, self.goe | 0xFF00
+        val, oe = self.gout & 0x7FFF | self.host.miso << 15, self.goe | 0xFF00
         seen = 0
         for lane in reversed(self.lanes):  # lane 0 has highest priority
             lv, lo, owned = lane.pin_drive()
@@ -115,13 +122,23 @@ class Chip:
         out = self.out_reg
         out_next = self.pad_outputs()  # output flops sample the current state
         # Everything below computes next state from current state.
+        # Fetch slot: IMEM is read for the thread that executes two cycles later,
+        # or given to the host if that thread is halted.
+        ft = self.threads[(self.now + 2) % isa.NTHREADS]
+        ft.fetch_ok = ft.run
+        if ft.run:
+            ft.ir = self.imem[(ft.ldi_addr if ft.ldi_phase else ft.pc) % isa.IMEM_WORDS]
+        self.host.imem_slot(ft.tid)
+        self.host.clock()
         tid = self.now % isa.NTHREADS
         t = self.threads[tid]
-        if t.run and self.now >= t.start_at:
+        if t.run and t.fetch_ok:
+            t.fetch_ok = False
             self.execute(t)
         for lane in self.lanes:
             lane.clock()
             lane.commit()
+        self.host.apply()
         self.out_reg = out_next
         self.prev_in = self.sync[-1]
         self.sync = [pads_in & MASK16] + self.sync[:-1]
@@ -135,7 +152,7 @@ class Chip:
 
     def execute(self, t: Thread):
         pc0 = t.pc
-        w = self.imem[pc0 % isa.IMEM_WORDS]
+        w = t.ir
         i = isa.decode(w)
         r = t.regs
         nxt = (t.pc + 1) % isa.IMEM_WORDS
@@ -145,9 +162,17 @@ class Chip:
         def stall():
             t.stalls += 1
 
+        if t.ldi_phase:
+            # second slot of ldi: the fetched word is the data
+            t.ldi_phase = 0
+            r[t.ldi_rd] = t.ir
+            t.pc = (t.pc + 1) % isa.IMEM_WORDS
+            return self.commit(t, pc0, t.ldi_word, (t.ldi_rd, t.ir))
         if name == "ill":
             self.illegal.append((self.now, t.tid, t.pc, w))
             t.run = False
+            t.illegal = True
+            t.step = False
             return
         if i.op == isa.OP_ALU3:
             a, b = r[i.rs], r[i.rt]
@@ -235,11 +260,12 @@ class Chip:
         elif name == "st":
             self.scratch[(r[i.rs] + i.imm) % isa.SCRATCH_WORDS] = r[i.rd]
         elif name == "ldi":
-            if t.ldi_phase == 0:
-                t.ldi_phase = 1
-                return None  # first slot: IMEM read, no architectural effect
-            t.ldi_phase = 0
-            wr = (i.rd, self.imem[(r[i.rs] + i.imm) % isa.IMEM_WORDS])
+            # first slot: the thread's next fetch reads the data word instead
+            t.ldi_phase = 1
+            t.ldi_addr = (r[i.rs] + i.imm) % isa.IMEM_WORDS
+            t.ldi_rd = i.rd
+            t.ldi_word = w
+            return None
         elif name == "b":
             if self.cond(t, i.rt):
                 nxt = (t.pc + 1 + i.imm) % isa.IMEM_WORDS
@@ -316,7 +342,13 @@ class Chip:
         if wr is not None:
             r[wr[0]] = wr[1] & MASK16
         t.pc = nxt
+        return self.commit(t, pc0, w, wr)
+
+    def commit(self, t, pc0, w, wr):
         t.retired += 1
+        if t.step:
+            t.run = False
+            t.step = False
         if self.trace_retires:
             self.retires.append(Retire(self.now, t.tid, pc0, w, *(wr if wr else (None, None))))
         return None

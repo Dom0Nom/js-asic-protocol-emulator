@@ -96,10 +96,9 @@ def decode(w: int) -> Insn:
                     imm=(w >> 6) & 15)
     if op == OP_TX:
         fl = w & 7
-        return Insn(op, "txcrc" if fl & 4 else "tx", lane=lane, rs=(w >> 7) & 7,
-                    imm=((w >> 3) & 15) + 1, rt=fl)
-    sub = (w >> 4) & 7
-    return Insn(op, LANE_SUB[sub], lane=lane, rd=(w >> 7) & 7, imm=w & 15)
+        return Insn(op, "txcrc" if fl & 4 else "tx", lane=lane, rs=c,
+                    imm=((w >> 6) & 15) + 1, rt=fl)
+    return Insn(op, LANE_SUB[w & 7], lane=lane, rd=c, imm=(w >> 6) & 15)
 
 
 def encode(name: str, rd=0, rs=0, rt=0, imm=0, lane=0) -> int:
@@ -144,9 +143,9 @@ def encode(name: str, rd=0, rs=0, rt=0, imm=0, lane=0) -> int:
         return (OP_LREG << 12) | lane << 10 | chk(imm, 0, 15, "lane register") << 6 | rd << 3 | (name == "lw") << 2
     if name in ("tx", "txcrc"):
         fl = rt | (4 if name == "txcrc" else 0)
-        return (OP_TX << 12) | lane << 10 | rs << 7 | (chk(imm, 1, 16, "bit count") - 1) << 3 | fl
+        return (OP_TX << 12) | lane << 10 | (chk(imm, 1, 16, "bit count") - 1) << 6 | rs << 3 | fl
     if name in LANE_SUB:
-        return (OP_LANE << 12) | lane << 10 | rd << 7 | LANE_SUB.index(name) << 4 | chk(imm, 0, 15, "imm")
+        return (OP_LANE << 12) | lane << 10 | chk(imm, 0, 15, "imm") << 6 | rd << 3 | LANE_SUB.index(name)
     raise ValueError(f"unknown instruction {name}")
 
 

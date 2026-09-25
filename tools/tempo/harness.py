@@ -18,15 +18,24 @@ def net_of_input(i):
 
 
 class Harness:
-    def __init__(self, src, clock_hz=50e6, pullups=(), threads=None, chip=None, path=None):
+    def __init__(self, src, clock_hz=50e6, pullups=(), threads=None, chip=None, path=None,
+                 boot="backdoor"):
+        """boot: "backdoor" loads IMEM and starts threads directly; "host"
+        loads and starts them through the host SPI port, like real silicon."""
         self.prog = asm.assemble(src, FW if path is None else path)
         self.chip = chip or Chip()
-        self.chip.load(self.prog.words)
         self.board = Board(clock_hz=clock_hz, pullups=set(pullups))
         self.drive_ui = {}  # host-driven dedicated inputs {index: level}
-        for t, pc in sorted(self.prog.entries.items()):
-            if threads is None or t in threads:
-                self.chip.start(t, pc)
+        self.host = None
+        if boot == "host":
+            from .models.hostspi import HostDriver
+            self.host = self.attach(HostDriver())
+            self.host.boot(self.prog, threads)
+        else:
+            self.chip.load(self.prog.words)
+            for t, pc in sorted(self.prog.entries.items()):
+                if threads is None or t in threads:
+                    self.chip.start(t, pc)
         self.trace = []  # (cycle, value, oe) when the pads change
 
     def attach(self, dev):
@@ -37,11 +46,14 @@ class Harness:
         pads_in = 0
         for i in range(16):
             n = net_of_input(i)
-            lvl = self.drive_ui.get(i - 8) if i >= 8 and (i - 8) in self.drive_ui else nets.get(n, 1 if n in self.board.pullups else 0)
+            if i >= 8 and (i - 8) in self.drive_ui:
+                lvl = self.drive_ui[i - 8]
+            else:
+                lvl = nets.get(n, 1 if n in self.board.pullups else 0)
             pads_in |= (lvl & 1) << i
         val, oe = self.chip.step(pads_in)
         drives = {}
-        for i in range(15):
+        for i in range(16):
             if i < 8:
                 drives[net_of_output(i)] = (val >> i) & 1 if (oe >> i) & 1 else None
             else:
@@ -53,6 +65,10 @@ class Harness:
     def run(self, cycles):
         for _ in range(int(cycles)):
             self.step()
+
+    def boot_done(self, limit=200000):
+        """Run until the host driver has finished its queued transactions."""
+        return self.run_until(lambda: not self.host.busy, limit)
 
     def run_until(self, cond, limit):
         for _ in range(int(limit)):
