@@ -191,7 +191,9 @@ class Link:
         # drain anything a previous image left in the thread-to-host mailbox
         while self.get_some():
             pass
-        for t, pc in image["entry"].items():
+        # sorted: MicroPython dicts do not keep insertion order, and the
+        # transaction sequence should be the same on every port
+        for t, pc in sorted(image["entry"].items()):
             self.set_pc(t, pc)
         self.image = image
         if start:
@@ -205,13 +207,13 @@ class Link:
         for t in image["entry"]:
             threads |= 1 << t
         self.halt(threads)
-        for name, value in params.items():
+        for name, value in sorted(params.items()):
             a = image["params"][name]
             self.write_imem(a, [value & 0xFFFF])
             self.param_values[name] = value & 0xFFFF
         while self.get_some():
             pass
-        for t, pc in image["entry"].items():
+        for t, pc in sorted(image["entry"].items()):
             self.set_pc(t, pc)
         self.control(run_set=threads)
 

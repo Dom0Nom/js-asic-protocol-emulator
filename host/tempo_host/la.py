@@ -38,11 +38,17 @@ class Capture:
         for (t0, l0), (t1, _) in zip(e, e[1:]):
             (highs if l0 == 1 else lows).append(t1 - t0)
         period = (rises[-1] - rises[0]) / (len(rises) - 1)
-        hi_in = [w for w in highs]
+        # mean high over mean high + mean low: a capture that starts and
+        # ends on different levels holds one more interval of one kind
+        if highs and lows:
+            mh, ml = sum(highs) / len(highs), sum(lows) / len(lows)
+            duty = mh / (mh + ml)
+        else:
+            duty = None
         return {
             "frequency_hz": self.clock_hz / period,
             "period_cycles": period,
-            "duty": sum(hi_in) / (sum(hi_in) + sum(lows)) if hi_in and lows else None,
+            "duty": duty,
             "high_min": min(highs) if highs else None, "high_max": max(highs) if highs else None,
             "low_min": min(lows) if lows else None, "low_max": max(lows) if lows else None,
             "resolution_s": 1 / self.clock_hz,

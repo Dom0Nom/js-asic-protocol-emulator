@@ -240,6 +240,111 @@ async def test_uc9_triggered_pulse(dut):
             starts.append(c)
     rises = [c for c, v in out.edges if v == 1]
     offs = [r - starts[i] for r, i in zip(rises, (1, 3))]
-    assert offs == [1504, 1504], (offs, starts, rises)  # delay + 4 cycles of pipeline, every time
+    # delay + 4, every time: CAP = edge + 2 (input synchroniser), the pulse
+    # slot begins at CAP + delay exactly, and the pin shows it 2 cycles later
+    # (pad output register, board net update). The first draft of this test
+    # predicted 1505 before it ever ran; 1504 is what model and RTL both give,
+    # before and after the lane 3 cut.
+    assert offs == [1504, 1504], (offs, starts, rises)
     assert [b - a for (a, va), (b, vb) in zip(out.edges, out.edges[1:]) if va == 1] == [40, 40]
+    dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")
+
+
+@cocotb.test()
+async def test_uc7_i2c_eeprom_target(dut):
+    """Use case 7: the chip answers as a 24C02 in fast mode. An MCU model page
+    writes (with roll-over), random reads, and addresses a missing device."""
+    from tempo.models.i2c import I2cBusMonitor, I2cMaster
+    from tempo_host.target import Eeprom24c02Target
+    ls, link = await setup(dut, pullups={"uio4", "uio5"})
+    mon = ls.attach(I2cBusMonitor("uio5", "uio4", mode="fast"))
+    mcu = ls.attach(I2cMaster("uio5", "uio4", half=66))  # 380 kHz, SCL low >= tLOW 1.3 us
+
+    def host():
+        ee = Eeprom24c02Target(link, sda=4, scl=5, addr=0x50, contents=bytes(range(256)))
+        link.t.sleep_us(10)
+        mcu.run([("start",), ("write", 0xA0), ("write", 0x06)] + [("write", 0xB0 + i) for i in range(10)]
+                + [("stop",), ("start",), ("write", 0xA0), ("write", 0x06), ("start",), ("write", 0xA1),
+                   ("read", True), ("read", True), ("read", True), ("read", False), ("stop",),
+                   ("start",), ("write", 0xA2), ("stop",)])
+        while mcu.busy:
+            link.t.sleep_us(50)
+        link.t.sleep_us(40)
+        return ee.contents(), ee.writes()
+
+    contents, writes = await cocotb_call(host)
+    assert mcu.acks == [0] * 12 + [0, 0, 0, 1], mcu.acks
+    assert mcu.reads == [0xB8, 0xB9, 0x08, 0x09], [hex(x) for x in mcu.reads]
+    assert contents[0:8] == bytes(range(0xB2, 0xBA)) and contents[8:] == bytes(range(8, 256))
+    assert writes == [(6, 10)]
+    assert not mon.violations, mon.violations[:3]
+    assert not ls.board.contention
+    await cocotb_call(link.check)
+    dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")
+
+
+@cocotb.test()
+async def test_uc6_i2c_monitor(dut):
+    """Use case 6: passive I2C decode of a 400 kHz bus the chip never drives."""
+    from tempo.models.i2c import I2cMaster
+    from tempo_host.monitor import I2cMonitor
+    ls, link = await setup(dut, pullups={"uio4", "uio5"})
+    tgt = ls.attach(I2cTarget("uio5", "uio4", 0x50, regs=bytearray(range(256)), mode="fast"))
+    m = ls.attach(I2cMaster("uio5", "uio4", half=63))
+
+    def host():
+        mon = I2cMonitor(link, sda=4, scl=5)
+        link.t.sleep_us(4)
+        m.run([("start",), ("write", 0xA0), ("write", 0x10), ("write", 0x77),
+               ("start",), ("write", 0xA1), ("read", True), ("read", False), ("stop",),
+               ("start",), ("write", 0x3C << 1), ("stop",)])
+        ev = []
+        while m.busy:
+            ev += mon.poll()
+            link.t.sleep_us(10)
+        link.t.sleep_us(40)
+        ev += mon.poll()
+        return I2cMonitor.transactions(ev), mon.lost
+
+    tx, lost = await cocotb_call(host)
+    assert [(t["addr"], t["read"], t["ack"]) for t in tx] == [(0x50, 0, True), (0x50, 1, True), (0x3C, 0, False)], tx
+    assert tx[0]["data"] == [(0x10, True), (0x77, True)]
+    assert tx[1]["data"] == [(0x11, True), (0x12, False)]
+    assert tx[1]["time"] > tx[0]["time"] and not lost
+    assert tgt.regs[0x10] == 0x77
+    assert not ls.board.contention
+    await cocotb_call(link.check)
+    dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")
+
+
+@cocotb.test()
+async def test_uc6_spi_monitor(dut):
+    """Use case 6: an MCU model reads its flash at 1.25 MHz SCK; the chip
+    records both directions of every byte without driving the bus."""
+    from tempo.models.spi import SpiMaster
+    from tempo_host.monitor import SpiMonitor
+    ls, link = await setup(dut)
+    mem = bytearray(range(256)) * 16
+    ls.attach(SpiNorFlash("uio2", "uio0", "uio1", "uio3", mode=0, mem=mem, size=4096))
+    mcu = ls.attach(SpiMaster("uio2", "uio0", "uio1", "uio3", mode=0, half=20))
+
+    def host():
+        mon = SpiMonitor(link, mosi=0, miso=1, sck=2, cs=3, mode=0)
+        link.t.sleep_us(4)
+        mcu.transfer(b"\x9f\x00\x00\x00")
+        mcu.transfer(b"\x03\x00\x01\x20" + b"\x00" * 6)
+        got = []
+        while mcu.busy:
+            got += mon.poll()
+            link.t.sleep_us(8)
+        link.t.sleep_us(60)
+        got += mon.poll()
+        return got, mon.lost
+
+    got, lost = await cocotb_call(host)
+    assert [bytes(t["mosi"][:4]) for t in got] == [b"\x9f\x00\x00\x00", b"\x03\x00\x01\x20"], got
+    assert bytes(got[0]["miso"][1:4]) == b"\xef\x40\x18"
+    assert bytes(got[1]["miso"][4:]) == bytes(mem[0x120:0x126])
+    assert [t["count"] for t in got] == [4, 10] and not lost
+    await cocotb_call(link.check)
     dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")

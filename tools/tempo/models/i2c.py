@@ -135,6 +135,9 @@ class _I2cBusBase:
                 self._on_start(cycle)
             else:
                 self._on_stop(cycle)
+                # the bus is free after a STOP: a new START while SCL stays
+                # high is a legal transaction start, not a glitch
+                self._sda_changes_this_high = 0
         if scl_rising:
             self._sda_changes_this_high = 0
 
@@ -582,8 +585,11 @@ class I2cMaster:
                 yield
         nets_ref = self._nets
         if op[0] == 'start':
+            # repeated START: SCL is low after a byte; keep it low a full
+            # half period in total (tLOW) before releasing it
+            rep = h - h // 2 if self.lv[scl] == 0 else 0
             self.lv[sda] = None
-            yield from wait(2)
+            yield from wait(2 + rep)
             yield from scl_high()
             yield from wait(h)
             self.lv[sda] = 0
