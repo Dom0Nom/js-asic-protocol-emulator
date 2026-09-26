@@ -148,12 +148,14 @@ class SpiMonitor:
         self._marks = 0
         # the firmware's first time marker says both lanes are armed; bus
         # traffic before it would be missed on one lane only
+        startup = []
         for _ in range(1000):
-            self.poll()
+            startup += self.poll()
             if self._marks:
                 break
         else:
             raise RuntimeError("SPI monitor firmware did not arm")
+        self.done = startup + self.done
 
     def _word(self, w):
         kind = self._rec

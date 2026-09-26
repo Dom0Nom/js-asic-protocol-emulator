@@ -35,13 +35,16 @@ def _rxn_insn(lane, n):
 
 def bit_time(baud, clock_hz=CLOCK_HZ):
     """(prescaler, integer length, 1/256 fraction) for one bit."""
+    if baud <= 0 or clock_hz <= 0:
+        raise ValueError("baud and clock must be positive")
     cyc = clock_hz / baud
-    pre = 0
-    while cyc / (1 << pre) >= 65535:
-        pre += 1
-    units = cyc / (1 << pre)
-    whole = int(units)
-    return pre, whole, int(round((units - whole) * 256)) & 0xFF
+    for pre in range(8):  # MODE has a 3-bit prescaler
+        units = int(round(cyc * 256 / (1 << pre)))
+        # SAMP is 13 bits, so the midpoint must fit even though LEN is
+        # 16 bits. Round the entire fixed-point value to retain a carry.
+        if 256 <= units < 16384 * 256:
+            return pre, units >> 8, units & 0xFF
+    raise ValueError("baud cannot be represented at this chip clock")
 
 
 class Uart:
@@ -78,6 +81,8 @@ class Uart:
             "rxop": _rxn_insn(1, n_rx),
         }
         link.load(im, params)
+        if link.get(1)[0] != 0:
+            raise TempoError("UART receive startup failed")
         self.errors = 0
 
     @property

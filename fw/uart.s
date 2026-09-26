@@ -14,6 +14,8 @@
 ; Chip -> host, one word per received character:
 ;   [8:0] data, [9] framing error (stop bit low), [10] parity error,
 ;   [11] break (all bits low), [15] ring overflowed before this character
+; Before received characters, T1 sends one zero word when RX is armed.
+; The host constructor waits for it so immediate traffic is not lost.
 
         .include "tempo.inc"
         .equ RING_MASK, 511
@@ -98,7 +100,12 @@ rx_main:
         st   r2, [r3 + 2]              ; pump read index
         ldi  r6, [r0 + 15]             ; ring base
         call rxarm                     ; keep one receive queued ahead
+        call rxarm
+        li   r1, 0
+        hput r1                        ; ready, before publishing any characters
+        bra  r_read
 r_loop: call rxarm
+r_read:
         rx   r4, l1
         ldi  r1, [r0 + 9]              ; inversion mask
         xor  r4, r4, r1

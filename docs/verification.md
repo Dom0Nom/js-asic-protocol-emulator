@@ -33,10 +33,26 @@ commit lockstep checks the RTL against the cycle model. Bulk-read correctness
 is checked through the SRAM double buffer in both bit orders, and a model throughput regression
 requires the pipelined loop to improve on its 132,889-cycle baseline.
 
-The final retained RTL passes all 19 directed/use-case tests without skips
-on the PC (Icarus 14, cocotb 2.0.1, Python 3.12), 2026-09-26. The decoded-read
-trial also passed, but was rejected for its extended global-routing retries.
-Logs and current limitations are recorded in `notes/progress.md`.
+Host/firmware regressions also inject a data NACK at both I2C address widths
+and require exactly one rejected byte followed by STOP, then a successful
+new transfer. UART tests start traffic immediately when construction returns,
+check data together with parity flags, and receive from a 2% slow sender at
+300/600/1200/2400 baud. The RTL suite checks 300 baud and all three parity
+settings. Image-switch tests retain old pin ownership, capture mode, mailbox
+commands and UART ring state before loading again, and verify the resulting
+wire data and flags. Numeric tests cover fractional timing carries; the
+MicroPython unix port checks the same carry and sample-width boundary.
+The SPI monitor is also armed during a 150-transaction burst. Its constructor
+must preserve records read while waiting for readiness, every damaged record
+must be flagged, and an intact transaction must arrive after the backlog drains.
+
+The final host/firmware code passes all 24 directed/use-case RTL tests,
+with no failures or skips and exit 0, on the PC (Icarus 14, cocotb 2.0.1,
+Python 3.12), 2026-09-26. All 73 simulation source hashes match the working
+tree. The complete Python suite also passes all 157 tests, including
+MicroPython replay and CLI sessions. These are simulation results; board
+verification and physical signoff remain pending. Logs and current limitations
+are recorded in `notes/progress.md`.
 
 ### 5. Constrained-random lockstep
 
@@ -83,6 +99,7 @@ From `notes/bugs.md`:
 | Submission pin map against RTL and board transport | 34 |
 | Independent physical metrics and obstruction audit | 29, 35 |
 | Experiment runner failure-path check | 36 |
+| Host/firmware negative protocol and image-switch tests | 37, 38, 39, 40, 41, 42, 43 |
 
 ## Not done yet
 

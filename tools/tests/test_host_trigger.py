@@ -55,11 +55,13 @@ def test_uart_byte_trigger_exact_delay():
 
 def test_edge_count_trigger_and_late_flag():
     h = Harness(None, boot="host")
-    edges_at = [40000 + 1000 * k for k in range(9)]
-    trig_in = h.attach(Pulses("uio1", edges_at))
+    trig_in = h.attach(Pulses("uio1", []))
     out = h.attach(EdgeLog("uio0"))
     link = Link(model_transport(h))
     trig = PulseTrigger(link, out=0, trig=1, delay=300, width=20, kind="edge", count=3)
+    # Schedule after loading, which now includes the cleanup image.
+    edges_at = [h.board.cycle + 1000 + 1000 * k for k in range(9)]
+    trig_in.at = list(edges_at)
     assert trig.wait(3, timeout_us=5000) == 3
     h.run(2000)
     rises = [c for c, v in out.edges if v == 1]
@@ -68,8 +70,34 @@ def test_edge_count_trigger_and_late_flag():
     assert len(set(offs)) == 1 and 300 <= offs[0] <= 306, offs
     # a delay the firmware cannot meet is flagged, not silently shifted
     h2 = Harness(None, boot="host")
-    h2.attach(Pulses("uio1", [40000, 40001]))
+    late_in = h2.attach(Pulses("uio1", []))
     link2 = Link(model_transport(h2))
     t2 = PulseTrigger(link2, out=0, trig=1, delay=2, width=5, kind="edge", count=1)
+    late_in.at = [h2.board.cycle + 1000, h2.board.cycle + 1001]
     with pytest.raises(TempoError, match="lane 0 LATE"):
         t2.wait(1, timeout_us=2000)
+
+
+@pytest.mark.parametrize("baud", [300, 2400, 9600])
+def test_uart_trigger_rejects_frames_outside_timestamp_window(baud):
+    h = Harness(None, boot="host", pullups={"uio1"})
+    link = Link(model_transport(h))
+    # A prescaler alone cannot fix slow triggers: at 9600 baud the
+    # 16-bit CAP anchor made a requested 60000-cycle delay take 125540
+    # cycles (one whole wrap plus the normal 4-cycle pad pipeline).
+    # Reject before loading rather than promise an ambiguous anchor.
+    with pytest.raises(ValueError, match="timestamp window"):
+        PulseTrigger(link, baud=baud, match=0x42, delay=60000, width=100)
+    assert h.board.cycle == 0
+
+
+def test_uart_trigger_after_edge_trigger_clears_capture_mode():
+    h = Harness(None, boot="host", pullups={"uio1"})
+    tx = h.attach(UartTx("uio1", 115200))
+    link = Link(model_transport(h))
+    PulseTrigger(link, kind="edge")
+    h.run(1000)
+    trig = PulseTrigger(link, kind="uart", match=0x42, delay=6000)
+    h.run(1000)
+    tx.send(b"\x42")
+    assert trig.wait(1, timeout_us=1000) == 1

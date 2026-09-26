@@ -70,6 +70,35 @@ async def test_uc2_i2c_recovery(dut):
 
 
 @cocotb.test()
+async def test_i2c_stops_at_data_nack(dut):
+    for addr, addr10 in [(0x68, False), (0x2A5, True)]:
+        ls, link = await setup(dut, pullups={"uio4", "uio5"})
+        target = ls.attach(I2cTarget("uio5", "uio4", addr, mode="fast",
+                                     nack_after=0, addr10=addr10))
+
+        def host():
+            bus = i2c_mod.I2c(link)
+            try:
+                bus.transfer(addr, b"\x20\xa1\xb2\xc3", read=2, addr10=addr10)
+            except i2c_mod.Nack:
+                return bus
+            raise AssertionError("target NACK was ignored")
+
+        bus = await cocotb_call(host)
+        await ls.run(2000)
+        assert [e.detail for e in target.events if e.kind == "data_write_rejected"] == [0xA1]
+        assert target.events[-1].kind == "stop"
+
+        def next_transfer():
+            target.nack_after = None
+            bus.transfer(addr, b"\x20\x99", addr10=addr10)
+            return bus.transfer(addr, b"\x20", 1, addr10=addr10)
+
+        assert await cocotb_call(next_transfer) == b"\x99"
+        assert not target.violations and not ls.board.contention
+
+
+@cocotb.test()
 async def test_uc3_spi_flash_programmer(dut):
     """Use case 3: JEDEC ID, SFDP, read, bulk read through SRAM, erase, program."""
     import random
@@ -150,6 +179,75 @@ async def test_uc1_uart_autobaud_console(dut):
     assert prompt == b"ok>", prompt
     assert bytes(target_rx.bytes) == b"help\r" and not target_rx.errors, target_rx.errors
     dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")
+
+
+@cocotb.test()
+async def test_uart_receive_ready_and_slow_baud(dut):
+    for baud, parity in [(115200, None), (115200, "even"), (115200, "odd"), (300, None)]:
+        ls, link = await setup(dut, pullups={"uio1"})
+        tx = ls.attach(UartTx("uio1", baud, parity=parity,
+                               baud_error=-0.02 if baud == 300 else 0))
+
+        def host():
+            u = uart_mod.Uart(link, baud=baud, parity=parity)
+            tx.send(b"\x81")  # starts immediately when construction returns
+            return u.read(1, timeout_us=50000)
+
+        assert await cocotb_call(host) == b"\x81"
+        assert not ls.board.contention
+
+
+@cocotb.test()
+async def test_uart_parity_error_preserves_received_data(dut):
+    ls, link = await setup(dut, pullups={"uio1"})
+    tx = ls.attach(UartTx("uio1", 115200, parity="odd"))
+
+    def host():
+        uart_mod.Uart(link, baud=115200, parity="even")
+        tx.send(b"\x01\x03")
+        return link.get(2, timeout_us=2000)
+
+    words = await cocotb_call(host)
+    assert words == [uart_mod.PE | 0x01, uart_mod.PE | 0x03], words
+
+
+@cocotb.test()
+async def test_firmware_reload_clears_pin_owners_modes_and_mailboxes(dut):
+    ls, link = await setup(dut, pullups={"uio1", "uio4"})
+
+    def spi_to_uart():
+        spi = spi_mod.Spi(link, period=6)
+        spi.write(b"\x00")
+        spi.end()
+        uart_mod.Uart(link)
+        link.check()
+        link.halt()
+        link.put([1, 0x5500])  # must not become UART commands after reload
+
+    await cocotb_call(spi_to_uart)
+    rx = ls.attach(UartRx("uio4", 115200))
+
+    def new_uart():
+        uart_mod.Uart(link, tx=4).write(b"\x81")
+
+    await cocotb_call(new_uart)
+    await ls.run(15000)
+    assert rx.bytes == [0x81] and not rx.errors, (rx.bytes, rx.errors)
+
+    tx = ls.attach(UartTx("uio1", 115200))
+    tx.send(b"\x81\x82\x83")
+    assert await cocotb_call(lambda: link.get(3, timeout_us=2000)) == [0x81, 0x82, 0x83]
+    await cocotb_call(lambda: uart_mod.Uart(link, tx=4))
+    tx.send(b"\x99")
+    assert await cocotb_call(lambda: link.get(1, timeout_us=2000)) == [0x99]
+
+    await cocotb_call(lambda: PulseTrigger(link, kind="edge"))
+    await ls.run(1000)
+    trig = await cocotb_call(lambda: PulseTrigger(link, kind="uart", match=0x42, delay=6000))
+    await ls.run(1000)
+    tx.send(b"\x42")
+    assert await cocotb_call(lambda: trig.wait(1, timeout_us=1000)) == 1
+    assert not ls.board.contention
 
 
 @cocotb.test()
@@ -374,3 +472,44 @@ async def test_uc6_spi_monitor(dut):
     assert not any(t["flags"] for t in got)
     await cocotb_call(link.check)
     dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")
+
+
+@cocotb.test()
+async def test_spi_monitor_preserves_transactions_during_startup(dut):
+    from tempo.models.spi import SpiMaster
+    from tempo_host.monitor import SpiMonitor
+    ls, link = await setup(dut)
+    mem = bytearray((i * 37 + 5) & 0xFF for i in range(4096))
+    ls.attach(SpiNorFlash("uio2", "uio0", "uio1", "uio3", mem=mem, size=4096))
+    mcu = ls.attach(SpiMaster("uio2", "uio0", "uio1", "uio3", half=8))
+
+    def host():
+        for k in range(150):
+            mcu.transfer(bytes([3, 0, 1, k]) + bytes(6))
+        mon = SpiMonitor(link)
+        assert mcu.busy
+        got = []
+        while mcu.busy:
+            got += mon.poll()
+            link.t.sleep_us(4)
+        for _ in range(20):
+            link.t.sleep_us(10)
+            got += mon.poll()
+        good = [t for t in got if t["count"] == 10 and bytes(t["mosi"][:3]) == b"\x03\x00\x01"
+                and bytes(t["miso"][4:]) == bytes(mem[0x100 + t["mosi"][3]:][:6])]
+        assert all(t in good or t["flags"] for t in got), got
+        assert good and mon.lost
+        for _ in range(150):
+            link.t.sleep_us(20)
+            mon.poll()
+        mcu.transfer(bytes([3, 0, 1, 200]) + bytes(6))
+        last = []
+        for _ in range(40):
+            link.t.sleep_us(10)
+            last += mon.poll()
+        return last
+
+    last = await cocotb_call(host)
+    assert [(bytes(t["mosi"]), bytes(t["miso"][4:]), t["flags"]) for t in last] == [
+        (bytes([3, 0, 1, 200]) + bytes(6), bytes(mem[0x100 + 200:][:6]), 0)], last
+    assert not ls.board.contention

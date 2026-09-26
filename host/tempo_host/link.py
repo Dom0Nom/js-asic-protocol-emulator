@@ -174,13 +174,26 @@ class Link:
     def halt(self, mask=15):
         self.control(run_clear=mask)
 
+    def _reset_runtime(self):
+        """Quiesce lanes and clear scratch/mailboxes before loading an image."""
+        from .images import IMAGES
+        reset = IMAGES["reset"]
+        self.halt(15)
+        while self.get_some():
+            pass
+        self.write_imem(reset["base"], reset["words"])
+        self.set_pc(0, reset["entry"][0])
+        self.control(run_set=1)
+        if self.get(1)[0] != 0:
+            raise TempoError("runtime reset failed")
+        self.halt(15)
+
     def load(self, image, params=None, start=True):
         """Load a firmware image (see images.py), patch its parameter block,
         set the entry PCs and start the entry threads."""
         threads = 0
         for t in image["entry"]:
             threads |= 1 << t
-        self.halt(15)
         words = list(image["words"])
         base = image["base"]
         p = image["params"]
@@ -188,6 +201,7 @@ class Link:
             if name not in p:
                 raise TempoError("image %s has no parameter %s" % (image["name"], name))
             words[p[name] - base] = value & 0xFFFF
+        self._reset_runtime()
         self.write_imem(base, words)
         self.param_values = {}
         for name, a in p.items():

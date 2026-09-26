@@ -107,9 +107,15 @@ class I2c:
         acks = []
         i = 0
         while i < len(words):
-            # the first piece ends at the address byte, so nothing is clocked
-            # after a NACKed address
-            part = words[i:min(i + 4, 2 if i == 0 else len(words))]
+            # A WRITE can NACK, including either 10-bit address byte and
+            # the read address after a repeated START. Await that ACK
+            # before queuing anything after it. Reads can still be batched.
+            end = i
+            while end < len(words) and end - i < 4:
+                end += 1
+                if (words[end - 1] >> 8) == WRITE:
+                    break
+            part = words[i:end]
             i += len(part)
             want = sum(1 for w in part if (w >> 8) in (WRITE, READ_ACK, READ_NACK))
             got = self._cmd(part, want)

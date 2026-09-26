@@ -21,9 +21,11 @@ def deltas(edges):
 def test_capture_exact_intervals_markers_and_vcd():
     h = Harness(None, boot="host")
     sq = h.attach(Square("uio0", high=300, low=700, start=20000))
-    far = h.attach(Pulses("uio2", [60000, 60050, 110000, 110013]))
+    far = h.attach(Pulses("uio2", []))
     link = Link(model_transport(h))
     la = LogicAnalyser(link, pins=(0, 1, 2), names=["clk", "idle", "rare"], n=150)
+    # Include every rare edge after the loader's cleanup and capture arm.
+    far.at = [h.board.cycle + c for c in (10000, 10050, 60000, 60013)]
     cap = la.capture(timeout_us=4000)
     assert not cap.overruns
     got0 = cap.edges[0]
@@ -40,12 +42,16 @@ def test_capture_exact_intervals_markers_and_vcd():
 
 def test_trigger_on_falling_edge():
     h = Harness(None, boot="host")
-    h.attach(Pulses("uio3", [80000, 80400], level=1))  # trigger pin falls at 80000, after arming
+    trigger = h.attach(Pulses("uio3", [], level=1))
     sig = h.attach(Square("uio0", high=100, low=100, start=10000))
     link = Link(model_transport(h))
     la = LogicAnalyser(link, pins=(0,), trigger=(3, "fall"), n=20)
+    # Keep the original fixture's phase: trigger on a square-wave edge,
+    # leaving 100 cycles to arm before the first edge we expect to capture.
+    trigger_at = ((h.board.cycle + 10000) // 200 + 1) * 200
+    trigger.at = [trigger_at, trigger_at + 400]
     cap = la.capture(timeout_us=4000)
     first = cap.edges[0][0][0] + cap.start
     # the first captured edge is the first square edge after the trigger
-    trig_edges = [c for c, _ in sig.edges if c > 80000]
+    trig_edges = [c for c, _ in sig.edges if c > trigger_at]
     assert len(cap.edges[0]) >= 15 and abs((first - trig_edges[0]) % 65536) < 8

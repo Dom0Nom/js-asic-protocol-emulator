@@ -75,7 +75,9 @@ def _square(h):
 
 def _pulses(h):
     from .models.siggen import Pulses
-    h.attach(Pulses("uio1", [30000 + 1000 * k for k in range(9)]))
+    # The loader now runs a cleanup image first. Start after both images
+    # are loaded; pulses during loading are not armed trigger events.
+    h.attach(Pulses("uio1", [100000 + 1000 * k for k in range(9)]))
 
 
 # name: (board setup, command lines)

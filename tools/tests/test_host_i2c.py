@@ -85,3 +85,20 @@ def test_fast_mode_plus_timing():
     h, i2c = board(t, mode="fmp")
     assert i2c.read_regs(0x3C, 5, 2) == bytes([5, 6])
     assert not t.violations, t.violations[:3]
+
+
+@pytest.mark.parametrize("addr,addr10", [(0x68, False), (0x2A5, True)])
+def test_data_nack_stops_before_next_byte(addr, addr10):
+    t = I2cTarget("uio5", "uio4", addr, mode="fast", nack_after=0, addr10=addr10)
+    h, i2c = board(t)
+    with pytest.raises(Nack):
+        i2c.transfer(addr, b"\x20\xa1\xb2\xc3", read=2, addr10=addr10)
+    h.run(2000)  # let the queued STOP reach the wire
+    rejected = [e.detail for e in t.events if e.kind == "data_write_rejected"]
+    assert rejected == [0xA1], rejected
+    assert t.events[-1].kind == "stop"
+    # A failure must leave the bus and mailbox usable for the next request.
+    t.nack_after = None
+    i2c.transfer(addr, b"\x20\x99", addr10=addr10)
+    assert i2c.transfer(addr, b"\x20", 1, addr10=addr10) == b"\x99"
+    assert not t.violations and not h.board.contention

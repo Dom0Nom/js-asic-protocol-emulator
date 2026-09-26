@@ -144,3 +144,32 @@ An independent OpenDB check finds 32 obstructed strap/pin shapes before
 the fix and zero after it. The number of database shapes differs from
 Magic's decomposed feedback boxes. A new full extraction/DRC/LVS run is
 still required before treating the overlap count as resolved at signoff.
+
+## Protocol startup and reprogramming, 2026-09-26
+
+Firmware replacement now uses a 73-word temporary cleanup image before the
+new image. Halting the barrel leaves autonomous lanes and their pin owners
+active; `stop` preserves configuration by design. The cleanup stops all
+lanes, restores writable lane registers, releases global GPIO and lane pin
+ownership, clears lane flags and all eight scratch words, and drains H2T.
+The host drains T2H before starting it and waits for its completion word.
+It uses the existing host port and ISA, with no RTL, area or reserved SRAM
+increase. The cost is extra startup transactions. `patch` remains an in-image
+parameter restart, rather than a firmware replacement.
+
+UART startup waits for an armed-receive acknowledgement, and bit timing
+rounds the complete fixed-point value with a prescaler constrained by SAMP's
+13 bits. This preserves the first incoming character and midpoint sampling
+at low rates. Protocol tests include 300 to 2400 baud with a 2% slow sender.
+
+I2C waits for every write-byte ACK before queuing another command. This
+adds host round trips for writes, but prevents bytes or reads after a NACK.
+Receive bytes still use four-word batches.
+
+The UART-trigger tool rejects frames lasting at least 32768 core cycles.
+It otherwise silently schedules from a wrapped 16-bit CAP timestamp: the
+9600-baud reproduction takes 125540 cycles for a requested delay of 60000.
+Its firmware also has no prescaler configuration. Extending that tool to
+slow rates requires a wider software timebase and explicit prescaler
+handling; a rate accepted by the UART console is not automatically valid
+for this trigger tool. The restriction scales with the actual chip clock.

@@ -31,6 +31,8 @@ class PulseTrigger:
         self.link = link
         hi, lo = divmod(int(delay), 16384)
         pre, whole, frac = bit_time(baud, link.clock_hz)
+        if kind == "uart" and (whole + frac / 256) * (1 << pre) * 10 >= 32768:
+            raise ValueError("UART trigger frame exceeds the 16-bit timestamp window")
         idle = E_DEN | (0 if active_high else E_D)
         link.load(IMAGES["trigger"], {
             "kind": 1 if kind == "uart" else 2,

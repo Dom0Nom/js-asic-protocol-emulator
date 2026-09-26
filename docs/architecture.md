@@ -45,9 +45,9 @@ Tempo separates what the firmware decides from when the pins move, and makes tha
 5. **Clocked and open-drain pins are first class.** A lane drives a clock pulse inside the slot (SPI modes 0-3, JTAG, SWD, I2C), can run D and C open-drain, freezes its timeline while a stretched clock is held low, and in arbitration mode stops driving at the first lost bit (I2C multi-master, CAN).
 6. **Nothing fails silently.** Missed start times, transmit underruns mid-frame, receive FIFO overruns, late `waitt`, stuffing errors and lost arbitration all set sticky flags.
 
-**Timing-independence theorem.** For two runs in which every lane receives the same command stream and no timing flag fires, the pin traces are identical, whatever the thread interleaving, stalls, host traffic or instruction timing. Designs whose timing comes from counting instructions (PIO, PRU, and deadline-register cores) cannot state this. It is proved formally on a reduced-width lane with a two-copy miter in SymbiYosys, and checked dynamically by random stall injection in both the model and the RTL. See `docs/verification.md`.
+**Timing-independence theorem.** For two runs in which every lane receives the same command stream and no timing flag fires, the pin traces are identical, whatever the thread interleaving, stalls, host traffic or instruction timing. Designs whose timing comes from counting instructions (PIO, PRU, and deadline-register cores) cannot state this. A reduced-width two-copy miter in SymbiYosys checks this property, but the proof is still incomplete. Dynamic model/RTL tests also exercise varying command timing. See `docs/verification.md`.
 
-Closest prior art, and what is borrowed: barrel threads and timed, timestamped ports are XMOS XS1. NRZI and stuffing in pin hardware exist in Propeller 2 smart pins (USB mode). Fractional timing with 8 fractional bits matches the RP2040 PIO clock divider. Tempo's contributions are the symbol table as a general line-code primitive, stretch-aware and arbitration-aware clocked lanes, capture-to-FIFO, and the timing-independence property with its proof, all in 0.9 mm².
+Closest prior art, and what is borrowed: barrel threads and timed, timestamped ports are XMOS XS1. NRZI and stuffing in pin hardware exist in Propeller 2 smart pins (USB mode). Fractional timing with 8 fractional bits matches the RP2040 PIO clock divider. Tempo's contributions are the symbol table as a general line-code primitive, stretch-aware and arbitration-aware clocked lanes, capture-to-FIFO, and the timing-independence property under verification, all in 0.9 mm².
 
 Direct bit-banging stays first class. A thread can move any lane pin with cycle-exact timing using `start` (schedule) plus `emit` (raw levels), without any line coding. Protocols with no use for the coding pipeline, such as PS/2 or custom sensor buses, are written this way.
 
@@ -297,6 +297,20 @@ CRC step for bit `b`: LSB first, `crc = (crc >> 1) ^ (POLY if (crc ^ b) & 1)`; M
 **Capture mode** (`MODE.CAPTURE`): the lane does not run commands; every edge of the filtered I input pushes `NOW` into the RX FIFO with ERR = the new level.
 
 ### Host port
+
+`Link.load` first runs a temporary reset program through this same port.
+It stops all three lanes, restores their writable configuration, releases
+their pin ownership and global GPIO, and discards queued commands from the
+previous image. Halting threads alone does not stop autonomous lanes, and
+the ISA's `stop` deliberately preserves configuration and pin levels.
+The reset program occupies 73 SRAM words and is overwritten by the new image;
+it adds startup transactions without adding hardware or reserved SRAM space.
+It also runs with `start=False`, before the user image is left halted.
+
+UART firmware sends one zero readiness word after both receives are armed.
+The host `Uart` constructor consumes it before returning; subsequent mailbox
+words are received characters. UART timing uses a prescaler that fits the
+midpoint in 13-bit SAMP, and carries fractional rounding into LEN.
 
 SPI mode 0, MSB first, `HCS_N` frames a transaction, `HSCK` at most `clk / 12`. MISO moves to the next bit 3 to 5 clock cycles after each rising `HSCK` edge (synchroniser, logic, output register), so the host sees the bit it samples on a rising edge for a whole SCK period and hold time is at least 3 clock cycles. The first byte is a command; multi-byte values are big endian.
 
