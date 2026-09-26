@@ -319,14 +319,14 @@ async def test_uc6_i2c_monitor(dut):
 
 @cocotb.test()
 async def test_uc6_spi_monitor(dut):
-    """Use case 6: an MCU model reads its flash at 1.25 MHz SCK; the chip
+    """Use case 6: an MCU model reads its flash at 3.1 MHz SCK; the chip
     records both directions of every byte without driving the bus."""
     from tempo.models.spi import SpiMaster
     from tempo_host.monitor import SpiMonitor
     ls, link = await setup(dut)
     mem = bytearray(range(256)) * 16
     ls.attach(SpiNorFlash("uio2", "uio0", "uio1", "uio3", mode=0, mem=mem, size=4096))
-    mcu = ls.attach(SpiMaster("uio2", "uio0", "uio1", "uio3", mode=0, half=20))
+    mcu = ls.attach(SpiMaster("uio2", "uio0", "uio1", "uio3", mode=0, half=8))
 
     def host():
         mon = SpiMonitor(link, mosi=0, miso=1, sck=2, cs=3, mode=0)
@@ -346,5 +346,6 @@ async def test_uc6_spi_monitor(dut):
     assert bytes(got[0]["miso"][1:4]) == b"\xef\x40\x18"
     assert bytes(got[1]["miso"][4:]) == bytes(mem[0x120:0x126])
     assert [t["count"] for t in got] == [4, 10] and not lost
+    assert not any(t["flags"] for t in got)
     await cocotb_call(link.check)
     dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")

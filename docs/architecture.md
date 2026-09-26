@@ -264,7 +264,7 @@ Registers (`lr` reads the current value; `lw` goes through the command queue):
 
 `CFG`: `[0]` MSB first, `[1]` DOD (D open drain), `[2]` COD (C open drain), `[3]` CEN, `[4]` CPOL, `[5]` STRETCH, `[6]` NRZI, `[7]` DIFF (A = not D), `[10:8]` STUFF (0 off), `[11]` STUFFANY, `[12]` AUTOSTART, `[13]` DREL (release D in receive slots and when idle instead of holding it).
 
-`STAT`: `[0]` busy, `[1]` queue full, `[2]` RX FIFO not empty, sticky: `[3]` start match, `[4]` stop match, `[5]` LATE, `[6]` UNDER, `[7]` STUFFERR, `[8]` OVERRUN, `[9]` ARBLOST; `[15:12]` bit count minus 1 of the last popped RX entry.
+`STAT`: `[0]` busy, `[1]` queue full, `[2]` RX FIFO not empty, sticky: `[3]` start match, `[4]` stop match, `[5]` LATE, `[6]` UNDER, `[7]` STUFFERR, `[8]` OVERRUN, `[9]` ARBLOST; `[15:11]` bit count (0 to 16) of the last popped RX entry.
 
 **Queue.** Two entries, in order: `tx`, `rxn`, `emit`, `lw`, `start`/`sync`. The command in progress is not in the queue. At the end of a command the lane takes the queue head: an `lw` applies immediately and the lane looks at the next entry in the same cycle, so one `lw` between two commands costs no time; each further consecutive `lw` delays the next slot by one cycle. `start`/`sync` set the start time of the next command. With an empty queue, entries apply one per cycle as they arrive.
 

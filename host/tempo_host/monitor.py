@@ -96,14 +96,37 @@ class I2cMonitor:
         return txs
 
 
+class _NearClock:
+    """Unwraps 16-bit timestamps that arrive nearly in order (each within
+    32767 cycles of the previous one, either way)."""
+
+    def __init__(self):
+        self.prev = None
+        self.full = 0
+
+    def __call__(self, t):
+        if self.prev is None:
+            self.prev = t
+            return 0
+        d = ((t - self.prev + 32768) & 0xFFFF) - 32768
+        self.full += d
+        self.prev = t
+        return self.full
+
+
+LOST = 16
+FLAG_NAMES = ("SKEW", "UNDER", "STUFFERR", "OVERRUN", "LOST")
+
+
 class SpiMonitor:
     """Passive SPI monitor. Records MOSI and MISO bytes of each CS-framed
-    transaction with the CS-fall time; with keep=K only the first K bytes of
-    each transaction are recorded (the rest are counted), which is what
-    matters for "which commands and addresses did the MCU send", at a
-    higher SCK."""
+    transaction with the CS-fall time. The chip stores 16-bit words (one
+    MOSI/MISO pair per 16 SCK edges); with keep=K only the first K bytes
+    (rounded up to whole words) of each transaction are stored and the rest
+    counted, which is what matters for "which commands and addresses did
+    the MCU send" on long reads."""
 
-    def __init__(self, link, mosi=0, miso=1, sck=2, cs=3, mode=0, keep=0xFFFF, filter_cycles=0):
+    def __init__(self, link, mosi=0, miso=1, sck=2, cs=3, mode=0, keep=None, filter_cycles=0):
         self.link = link
         edge = 1 if mode in (0, 3) else 2  # MODE.XCLK: 1 rising, 2 falling
         link.load(IMAGES["spimon"], {
@@ -111,57 +134,108 @@ class SpiMonitor:
             "miso": cs << 12 | sck << 8 | miso << 4 | NOPIN,
             "cs": NOPIN << 12 | NOPIN << 8 | cs << 4 | NOPIN,
             "edge": edge << 12 | (filter_cycles & 7) << 9,
-            "keep": keep,
+            "keep": 0xFFFF if keep is None else (keep + 1) // 2,
         })
-        self.clock = _Clock()
+        self._keepw = None if keep is None else (keep + 1) // 2
+        self.clock = _NearClock()
         self.lost = 0
-        self.overruns = 0  # the chip reported an edge FIFO overrun: bytes were missed
-        self._pend = None
+        self.errors = []  # (time, names) of lane flags seen at CS rise
+        self._need = 0    # words still owed to the current record
+        self._rec = None
+        self._pairs = []
         self._cur = None
         self.done = []
+        self._marks = 0
+        # the firmware's first time marker says both lanes are armed; bus
+        # traffic before it would be missed on one lane only
+        for _ in range(1000):
+            self.poll()
+            if self._marks:
+                break
+        else:
+            raise RuntimeError("SPI monitor firmware did not arm")
+
+    def _word(self, w):
+        kind = self._rec
+        if kind == "pairs":
+            self._pairs.append(w)
+            self._need -= 1
+            if self._need == 0:
+                if self._cur is None:  # its start event was dropped
+                    self._cur = {"time": None, "words": [], "lost": True}
+                for k in range(0, len(self._pairs), 2):
+                    self._cur["words"].append((self._pairs[k], self._pairs[k + 1]))
+                self._pairs = []
+                self._rec = None
+            return
+        self._rec = None
+        if kind == "start":
+            if self._drop and self._cur is not None:  # its end event was dropped
+                cur = self._cur
+                self.done.append(self._finish(cur, len(cur["words"]), 0, LOST))
+            self._cur = {"time": self.clock(w), "words": []}
+        elif kind == "mark":
+            self.clock(w)
+            self._marks += 1
+        elif kind == "end":
+            cur, bits = self._cur, self._endinfo & 15
+            flags = (self._endinfo & 0xFF) >> 4
+            if cur is None or cur.get("lost") or self._drop:
+                flags |= LOST
+                cur = cur or {"time": None, "words": []}
+            self.done.append(self._finish(cur, w, bits, flags))
+            self._cur = None
+
+    def _finish(self, cur, count, bits, flags):
+        mosi, miso = bytearray(), bytearray()
+        words = cur["words"]
+        for k, (a, b) in enumerate(words):
+            if k == len(words) - 1 and bits:
+                nb = bits // 8  # whole bytes in the cut-off word, right-aligned
+                for j in range(nb):
+                    mosi.append((a >> (bits - 8 * (j + 1))) & 0xFF)
+                    miso.append((b >> (bits - 8 * (j + 1))) & 0xFF)
+            else:
+                mosi += bytes([a >> 8, a & 0xFF])
+                miso += bytes([b >> 8, b & 0xFF])
+        nbytes = 2 * (count - (1 if bits else 0)) + bits // 8
+        if len(words) < count and (self._keepw is None or len(words) < self._keepw):
+            flags |= LOST  # pairs dropped because the ring was full
+        if flags:
+            names = [n for b, n in enumerate(FLAG_NAMES) if flags >> b & 1]
+            self.errors.append((cur["time"], names))
+        return {"time": cur["time"], "mosi": mosi, "miso": miso, "count": nbytes,
+                "partial_bits": bits % 8, "flags": flags}
 
     def poll(self, max_words=64):
-        """Returns completed transactions: dicts with the CS-fall time,
-        mosi and miso bytes (recorded ones), the total byte count and any
-        bits of a cut-off byte."""
+        """Returns completed transactions: dicts with the CS-fall time (in
+        cycles), mosi and miso bytes (the stored ones), the total byte
+        count, bits of a trailing partial byte, and lane flags (bit 0
+        SKEW: the MOSI and MISO lanes counted different numbers of SCK
+        edges, so MISO is misaligned; bit 1 UNDER: SCK edges arrived with
+        no receive queued, bits were lost; bit 3 OVERRUN; bit 4 LOST: the
+        chip's buffers were full, so words or the transaction's start or
+        end are missing and the record may span several transactions)."""
         for _ in range(max_words // 4 + 1):
             ws = self.link.get_some()
             if not ws:
                 break
             for w in ws:
-                if self._pend is not None:
-                    kind = self._pend
-                    self._pend = None
-                    if kind == "count":
-                        if self._cur is not None:
-                            self._cur["count"] = w
-                            self.done.append(self._cur)
-                        self._cur = None
-                        continue
-                    t = self.clock(w)
-                    if kind == "start":
-                        self._cur = {"time": t, "mosi": bytearray(), "miso": bytearray(),
-                                     "count": None, "partial_bits": 0}
+                if self._rec is not None:
+                    self._word(w)
                     continue
                 top = w >> 12
-                if top == 0x8:
-                    self._pend = "start"
+                if top == 0xD:
+                    self._rec, self._need = "pairs", 2 * (w & 15)
+                    if self._need == 0:
+                        self._rec = None
+                elif top == 0x8:
+                    self._rec, self._drop = "start", w >> 8 & 1
                 elif top == 0x9:
-                    self._pend = "mark"
+                    self._rec = "mark"
                 elif top == 0xA:
-                    if self._cur is None:
-                        self._cur = {"time": None, "mosi": bytearray(), "miso": bytearray(),
-                                     "count": None, "partial_bits": 0}
-                    self._cur["partial_bits"] = w & 31
-                    self._pend = "count"
+                    self._rec, self._endinfo, self._drop = "end", w & 0xFF, w >> 8 & 1
                 elif top == 0xC:
-                    self.lost += w & 0xFFF
-                elif self._cur is not None:
-                    (self._cur["miso"] if w >> 8 else self._cur["mosi"]).append(w & 0xFF)
-        for st in self.link.errors_seen:
-            for e in st.errors():
-                if "OVERRUN" in e:
-                    self.overruns += 1
-        self.link.errors_seen = []
+                    self.lost += w & 0xFF
         out, self.done = self.done, []
         return out
