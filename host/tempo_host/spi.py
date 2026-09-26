@@ -39,7 +39,7 @@ def _unpack(words, n):
 class Spi:
     def __init__(self, link, mosi=0, miso=1, sck=2, cs=3, mode=0, period=8, sample=None):
         """Pins are Tempo pin indices (0-7 = uio0-7). period: clock cycles per
-        bit (SCK = 50 MHz / period), at least 4. sample: cycle within the bit
+        bit (SCK = clock / period), at least 4. sample: cycle within the bit
         at which MISO is sampled, default period - 1 (latest point, the most
         margin for pad and target delays)."""
         if period < 4:
@@ -61,7 +61,7 @@ class Spi:
 
     @property
     def sck_hz(self):
-        return 50e6 / self.period
+        return self.link.clock_hz / self.period
 
     def write(self, data):
         data = bytes(data)

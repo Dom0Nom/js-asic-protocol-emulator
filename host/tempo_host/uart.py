@@ -56,7 +56,7 @@ class Uart:
         self.baud = baud
         p = 0 if parity is None else (1 if parity == "even" else 2)
         np = 1 if p else 0
-        pre, whole, frac = bit_time(baud)
+        pre, whole, frac = bit_time(baud, link.clock_hz)
         n_tx = 1 + bits + np + stop
         n_rx = 1 + bits + np + 1  # receive ends mid first stop bit
         stoppos = 1 + bits + np
@@ -82,8 +82,8 @@ class Uart:
 
     @property
     def actual_baud(self):
-        pre, whole, frac = bit_time(self.baud)
-        return CLOCK_HZ / ((whole + frac / 256) * (1 << pre))
+        pre, whole, frac = bit_time(self.baud, self.link.clock_hz)
+        return self.link.clock_hz / ((whole + frac / 256) * (1 << pre))
 
     def write(self, data):
         data = bytes(data) if self.bits <= 8 else data
@@ -187,7 +187,7 @@ class Autobaud:
     def measure(self):
         w = self.widths()
         bit = estimate_bit(w)
-        return CLOCK_HZ / bit, w
+        return self.link.clock_hz / bit, w
 
 
 def autobaud(link, rx=1, tx=0, confirm=3, **frame):

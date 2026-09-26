@@ -58,3 +58,21 @@ def test_autobaud(baud, err):
     tx.send(b"U\x00Boot 1.0\r\n" * 3, gap_bits=3)
     found, u = U.autobaud(link, rx=1, confirm=0)
     assert found == baud, found
+
+
+def test_bridge_at_40mhz_chip_clock():
+    """A die that needs a slower clock keeps exact rates: the library
+    computes every bit time from Link.clock_hz."""
+    tgt_rx = UartRx("uio0", 115200, clock_hz=40e6)
+    tgt_tx = UartTx("uio1", 115200, clock_hz=40e6, baud_error=0.01)
+    h = Harness(None, boot="host", pullups={"uio0", "uio1"}, clock_hz=40e6)
+    h.attach(tgt_rx)
+    h.attach(tgt_tx)
+    link = Link(model_transport(h), clock_hz=40000000)
+    u = U.Uart(link, tx=0, rx=1, baud=115200)
+    assert abs(u.actual_baud - 115200) < 5
+    u.write(b"40 MHz")
+    tgt_tx.send(b"ok")
+    assert u.read(2, timeout_us=400000) == b"ok"
+    h.run_until(lambda: len(tgt_rx.bytes) >= 6, 400000)
+    assert bytes(tgt_rx.bytes) == b"40 MHz" and not tgt_rx.errors

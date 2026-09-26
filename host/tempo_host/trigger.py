@@ -30,7 +30,7 @@ class PulseTrigger:
         the trigger pin."""
         self.link = link
         hi, lo = divmod(int(delay), 16384)
-        pre, whole, frac = bit_time(baud)
+        pre, whole, frac = bit_time(baud, link.clock_hz)
         idle = E_DEN | (0 if active_high else E_D)
         link.load(IMAGES["trigger"], {
             "kind": 1 if kind == "uart" else 2,

@@ -82,8 +82,12 @@ def _words(b):
 class Link:
     """Transaction-level access to one Tempo chip."""
 
-    def __init__(self, transport):
+    def __init__(self, transport, clock_hz=50000000):
+        """clock_hz: the chip's clock as the board generates it. Every rate
+        the library computes (baud, SCK, I2C timing, timestamps) uses it, so
+        a die that needs a slower clock keeps exact protocol rates."""
         self.t = transport
+        self.clock_hz = clock_hz
         self.image = None
         self.errors_seen = []
 

@@ -3,7 +3,7 @@
 
 Runs the "i2c" firmware image (fw/i2c.s) on lane 3. Timing per NXP UM10204
 (see docs/specs.md): the bit slot is split so that SCL low and high times
-meet tLOW/tHIGH of the chosen mode at 50 MHz.
+meet tLOW/tHIGH of the chosen mode (slots scale with the link's clock).
 """
 
 from .images import IMAGES
@@ -40,7 +40,8 @@ class I2c:
         """sda, scl: Tempo pin indices (0-7 = uio0-7). mode: sm, fm, fmp;
         slot overrides the bit time in clock cycles."""
         self.link = link
-        s, cr, cf, samp = timing(slot or MODES[mode])
+        # MODES are cycles at 50 MHz; scale up (never down) for other clocks
+        s, cr, cf, samp = timing(slot or -(-MODES[mode] * link.clock_hz // 50000000))
         self.slot = s
         link.load(IMAGES["i2c"], {
             "pins": NOPIN << 12 | scl << 8 | sda << 4 | sda,

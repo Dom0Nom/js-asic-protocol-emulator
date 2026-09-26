@@ -1,0 +1,2 @@
+class RPMode:
+    SAFE, ASIC_RP_CONTROL, ASIC_MANUAL_INPUTS = 0, 1, 2

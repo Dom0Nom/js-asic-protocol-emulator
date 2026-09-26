@@ -150,4 +150,4 @@ class LogicAnalyser:
             if out:
                 initial[k] = 1 - out[0][1]
             edges.append(out)
-        return Capture(self.names, initial, edges, start, overruns)
+        return Capture(self.names, initial, edges, start, overruns, self.link.clock_hz)
