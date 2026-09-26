@@ -95,3 +95,52 @@ The first full-design harden (commit 0e3dfa5, four lanes, 30,874 cells after pla
 Chosen: the next step of the cut order, dropping lite lane 3. `tempo_core` synthesis: 24,742 to 20,840 cells, 364.9k to 309.7k um² (-15%). The ISA keeps the 2-bit lane field; an instruction on lane 3 is illegal (the thread halts and the host status reports it), so firmware can never silently target a missing lane. Every use case fits in three lanes: I2C moved to lane 2, the logic analyser's trigger moved to lane 0's A pin (patterns stay active in capture mode), and the three-lane concurrent cases (UART + I2C, JTAG, monitors) keep working.
 
 Considered: lowering placement density (not possible below the actual 54% utilization), routing on Metal1 (more horizontal capacity, but pin-access and precheck risk), latch-based configuration and register file (kept as the next levers; they trade area for timing and verification effort).
+
+## SPI throughput and rejected register-read trial, 2026-09-26
+
+A parallel decoded-register read trial reduced local mapped core area from
+20,974 cells / 310,594.32 um² to 20,887 / 304,640.63 um², with unchanged
+2,767 flops. Read-port equivalence was proven and all functional tests
+passed. It is **not retained**: global routing required extended clock NDR
+retries, versus 5m41s for the baseline, and no higher usable clock
+speed was established. Routing is the binding constraint;
+a smaller synthesis number alone does not justify this tradeoff. The trial
+snapshot remains in `runs/experiments/resume_decoded` on the PC. Final RTL
+retains the original register muxes and the validated index-width fixes.
+
+The SPI bulk firmware queues the next 16-bit transfer before receiving and
+storing the current word, then drains the final word explicitly. It keeps the
+two-half SRAM credit protocol and emits exactly 256 words per half. On the
+same cycle-model board at period 6, a 1024-byte read falls from 132,889 to
+125,614 cycles (5.47% fewer cycles, 5.79% more throughput). Host SPI transfer
+time is included; real board throughput remains unmeasured.
+
+SPI now exposes the lane's existing LSB-first setting without extra RTL.
+Two-byte mailbox words are swapped for LSB-first transfers; odd tails keep
+the firmware's high-byte convention. Modes 0/2 require period >= 5, modes
+1/3 >= 6, and sample >= 4/5 respectively. Shorter settings return stale MISO
+on the cycle model despite valid MOSI framing. The API rejects them before
+loading firmware, and caps periods at 8191 to keep clock/sample offsets in
+their 13-bit fields. These are implementation limits, not universal SPI
+timing requirements; pad and target delays may raise the minima.
+
+The submission pin map and datasheet now match `src/project.v` and the
+RP2350 transport: HSCK `ui[5]`, HMOSI `ui[6]`, HMISO `uo[3]`, HCS_N `ui[7]`.
+The old labels would have wired the host incorrectly. Area stays 6×4 and the
+50 MHz clock remains a target pending slow-corner timing closure.
+
+## SRAM power-domain gap, 2026-09-26
+
+The 44 Magic extraction overlaps come from full-height Metal4 supply straps
+crossing a real LEF obstruction between VDD! and VDDARRAY!. All feedback
+boxes lie inside that gap, and none lies inside any declared supply pin.
+After allocation and tidy, the plugin now subtracts each intersecting SRAM
+Metal4 obstruction from both the straps and exported power-pin shapes,
+using the LEF spacing plus 0.05 µm clearance. Existing rail vias outside
+the macro feed each remaining segment. R0 and MX are handled explicitly.
+
+The exact plugin passes a pinned-flow PDN probe with zero power-grid errors.
+An independent OpenDB check finds 32 obstructed strap/pin shapes before
+the fix and zero after it. The number of database shapes differs from
+Magic's decomposed feedback boxes. A new full extraction/DRC/LVS run is
+still required before treating the overlap count as resolved at signoff.

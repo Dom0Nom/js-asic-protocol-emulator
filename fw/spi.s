@@ -138,14 +138,18 @@ b_fill: addi r1, -1
         beq  b_base
         lc   r2, 256
         add  r1, r1, r2
-b_base: lc   r2, 256
+b_base: lc   r2, 255
         li   r5, 0
-b_word: tx   l2, r5, 16, x
+        tx   l2, r5, 16, x             ; prime the running transfer
+b_word: tx   l2, r5, 16, x             ; queue the next before draining this one
         rx   r5, l2
         sti  r5, r1
         li   r5, 0
         addi r1, 1
         djnz r2, b_word
+        rx   r5, l2                    ; drain the 256th word; no surplus clocks
+        sti  r5, r1
+        li   r5, 0
         hput r3                        ; half r3 is ready
         xori r3, 1
         djnz r4, b_half

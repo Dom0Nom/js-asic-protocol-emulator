@@ -8,7 +8,7 @@ from lockstep import Lockstep
 from tempo.models.i2c import Eeprom24Target, I2cTarget, StuckSda
 from tempo.transport import cocotb_call, cocotb_transport
 
-from tempo.models.spi import SpiNorFlash
+from tempo.models.spi import SpiNorFlash, SpiSlave
 from tempo.models.uart import UartRx, UartTx
 from tempo.models.swd import SwdTarget
 from tempo.models.jtag import JtagChain, Tap
@@ -100,6 +100,31 @@ async def test_uc3_spi_flash_programmer(dut):
     assert flash.erases == 1 and flash.programs == 2
     assert not flash.violations, flash.violations[:3]
     dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")
+
+
+@cocotb.test()
+async def test_spi_all_modes_at_minimum_period(dut):
+    """Host firmware, real target model and pad/commit lockstep, including
+    an odd byte and a host transfer boundary with CS held low."""
+    for mode, msb_first in [(mode, order) for mode in range(4) for order in (True, False)]:
+        ls, link = await setup(dut, pullups={"uio3"})
+        slave = ls.attach(SpiSlave("uio2", "uio0", "uio1", "uio3", mode=mode,
+                                  msb_first=msb_first,
+                                  response=b"\xa5\x3c\x96\x69"))
+        data = b"\x81\x3c\xa5\x7e\x00\xff\x96\x69\x42"
+
+        def host():
+            spi = spi_mod.Spi(link, mode=mode, period=5 + (mode & 1), msb_first=msb_first)
+            got = spi.xfer(data)
+            spi.end()
+            return got
+
+        assert await cocotb_call(host) == (b"\xa5\x3c\x96\x69" * 3)[:len(data)]
+        await ls.run(300)
+        assert slave.transactions[-1][0] == data
+        assert not slave.violations, (mode, slave.violations)
+        assert not ls.board.contention
+        await cocotb_call(link.check)
 
 
 @cocotb.test()

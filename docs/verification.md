@@ -22,11 +22,25 @@ The model follows one discipline the RTL also follows: in a cycle, threads, lane
 
 `test/lockstep.py` runs the RTL (cocotb, Icarus) and the model on one simulated board. Every cycle both receive the same pad inputs; the RTL's pads must equal the model's, and every instruction commit (thread, PC, register write) must match. Board devices react to the RTL's outputs. Programs are loaded through the host SPI port, as on the demo board.
 
-Directed RTL tests (`test/test.py`, all in lockstep): host boot and UART TX at 3 Mbaud (fractional bit period); UART RX at 1 Mbaud from a 2% fast sender; SPI modes 0 and 3 against a flash model; I2C fast mode with a clock-stretching target, repeated START, write and read; USB low-speed receive at +1.5% clock error with bit stuffing and CRC16 residual check, and USB transmit of an ACK.
+Directed RTL tests (`test/test.py`, all in lockstep): host boot and UART TX at 3 Mbaud (fractional bit period); UART RX at 1 Mbaud from a 2% fast sender; SPI modes 0 and 3 against a flash model; I2C fast mode with a clock-stretching target, repeated START, write and read; USB low-speed receive at +1.5% clock error with bit stuffing and CRC16 residual check, and USB transmit of an ACK. A register-bank test gives every thread/register a distinct word and reads all 32 back over the host port.
+
+`test/test_usecases.py` also checks the host SPI firmware in all four modes,
+both bit orders, at the cycle-model minimum periods (5 cycles for modes 0/2,
+6 for modes 1/3). Non-palindromic bytes expose bit reversal and stale MISO;
+a nine-byte transfer covers an odd tail and an eight-byte host chunk boundary
+with CS held low. Independent targets check MOSI setup/hold, while pad and
+commit lockstep checks the RTL against the cycle model. Bulk-read correctness
+is checked through the SRAM double buffer in both bit orders, and a model throughput regression
+requires the pipelined loop to improve on its 132,889-cycle baseline.
+
+The final retained RTL passes all 19 directed/use-case tests without skips
+on the PC (Icarus 14, cocotb 2.0.1, Python 3.12), 2026-09-26. The decoded-read
+trial also passed, but was rejected for its extended global-routing retries.
+Logs and current limitations are recorded in `notes/progress.md`.
 
 ### 5. Constrained-random lockstep
 
-`tools/tempo/randprog.py` generates random four-thread programs (all instruction classes, random lane configurations, bounded waits, forward control flow) and `test/test_random.py` runs them in lockstep with random noise on the inputs; unused bidirectional pins loop the chip's outputs back into its inputs, so lane receive paths see real traffic. Result so far: 118 seeds, 354,000 cycles, 27,356 commits compared, no divergence. 108 of those seeds ran before the receive-continuation change (bugs 11 to 13), so the random run is repeated after every RTL change.
+`tools/tempo/randprog.py` generates random four-thread programs (all instruction classes, random lane configurations, bounded waits, forward control flow) and `test/test_random.py` runs them in lockstep with random noise on the inputs; unused bidirectional pins loop the chip's outputs back into its inputs, so lane receive paths see real traffic. On the final retained RTL, 2026-09-26: 100 seeds, 300,000 cycles, 22,539 commits compared, no divergence, and 3,377 external-clock receive samples. Every instruction name has nonzero retired coverage; rare blocking instructions remain sparsely covered (`wev`: 1, `hget`: 5). The random run is repeated after every RTL change.
 
 ### 6. Formal proofs (SymbiYosys)
 
@@ -35,14 +49,22 @@ Directed RTL tests (`test/test.py`, all in lockstep): host boot and UART TX at 3
 
 Results:
 
-- `core.sby`, task `prove`: barrel isolation and mailbox bounds proven by k-induction (depth 8, bitwuzla, 3 s). Unbounded: they hold in every reachable state, for any lane behaviour. Task `bmc` (depth 30) also passes.
-- `lane_miter.sv`: running.
+- `core.sby`, task `prove`: barrel isolation, mailbox bounds, valid simultaneous mailbox indices proven by k-induction (depth 5, bitwuzla) on the index-width-fixed core, 2026-09-26. Task `bmc` (depth 30) also passes on the final core. Lanes are unconstrained stubs, so the core properties hold for any lane behaviour.
+- `lane_miter.sv`: the last run found no counterexample through step 14 and timed out at step 15. The timing-independence theorem remains unproven; it is not a passing depth-60 result.
 
 Run with `tools/pc.sh formal <job.sby> [task]`, which ships `formal/` and `src/` to the PC without touching a harden in progress.
 
 ### 7. Synthesis and physical gates
 
 `tools/synth.sh` synthesises any block against the IHP liberty on the Mac and fails on inferred latches or conflicting drivers; area per block is logged in `notes/area.md`. Full hardens run on the PC (`tools/pc.sh harden`) and in GitHub CI with the Tiny Tapeout precheck.
+
+The SRAM PDN step has unit tests for interval subtraction and LEF obstruction
+parsing. A pinned-flow probe checks the resulting OpenDB geometry independently:
+the old database has 32 Metal4 strap/pin shapes crossing SRAM obstructions,
+the clipped database has zero. PSM reports zero VPWR/VGND connectivity
+violations. This is geometry/connectivity evidence, not a new GDS, DRC or LVS
+signoff result. A deliberately one-second experiment returns timeout status
+124, verifying that the runner no longer hides flow failures.
 
 ## What each layer caught
 
@@ -57,7 +79,14 @@ From `notes/bugs.md`:
 | Chip-level protocol tests | 8, 12, 14, 15 |
 | Per-block synthesis | 9, 10 |
 | Writing firmware against the spec | 13 |
+| Host compatibility and independent SPI timing sweep | 30, 31, 32, 33 |
+| Submission pin map against RTL and board transport | 34 |
+| Independent physical metrics and obstruction audit | 29, 35 |
+| Experiment runner failure-path check | 36 |
 
 ## Not done yet
 
-Gate-level simulation of the hardened netlist, functional coverage reporting, and the formal results above.
+Full GDS signoff and gate-level simulation matching the final RTL/PDN, physical-board tests,
+USB enumeration, and completion of the lane timing-independence proof.
+Random lockstep logs report retired-instruction and external-clock receive
+coverage; an absent instruction remains an explicit coverage gap.

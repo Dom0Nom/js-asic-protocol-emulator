@@ -213,4 +213,17 @@ module tempo_host (
   assign t2h_pop  = byte_done && n_pop;
   assign step_v   = byte_done && n_step_v;
   assign step_t   = b[1:0];
+`ifdef FORMAL
+  // induction helpers for the core's mailbox bounds (formal/core.sby): a
+  // write frame pushes at most the space it reported, a read pops at most
+  // the level it reported
+  reg f_past = 1'b0;
+  always @(posedge clk) f_past <= 1'b1;
+  always @(posedge clk) begin
+    if (f_past && rst_n && $past(rst_n) && idx != 8'd0) begin
+      if (cmd == 8'h08) assert({1'b0, rcnt} + {1'b0, h2t_count} <= 4'd4);
+      if (cmd == 8'h09) assert(rcnt <= t2h_count && (!pk || rcnt != 3'd0));
+    end
+  end
+`endif
 endmodule

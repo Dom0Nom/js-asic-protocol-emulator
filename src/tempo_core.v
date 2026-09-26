@@ -243,7 +243,8 @@ module tempo_core #(
             ALU3_AND: res = a & b;
             ALU3_OR:  res = a | b;
             ALU3_XOR: res = a ^ b;
-            ALU3_SHL: begin res = a << sh; if (sh != 4'd0) begin set_c = 1'b1; c_val = a[5'd16 - {1'b0, sh}]; end end
+            // C = last bit shifted out, a[16 - sh], written 0 - sh in 4 bits (sh is 1..15 there)
+            ALU3_SHL: begin res = a << sh; if (sh != 4'd0) begin set_c = 1'b1; c_val = a[4'd0 - sh]; end end
             ALU3_SHR: begin res = a >> sh; if (sh != 4'd0) begin set_c = 1'b1; c_val = a[sh - 4'd1]; end end
             default:  begin res = $signed(a) >>> sh; if (sh != 4'd0) begin set_c = 1'b1; c_val = a[sh - 4'd1]; end end
           endcase
@@ -253,7 +254,7 @@ module tempo_core #(
           a = ry; sh = fn6[3:0];
           wr_en = 1'b1; set_z = 1'b1; set_n = 1'b1;
           if (fn6[5:4] == 2'b01) begin
-            res = a << sh; if (sh != 4'd0) begin set_c = 1'b1; c_val = a[5'd16 - {1'b0, sh}]; end
+            res = a << sh; if (sh != 4'd0) begin set_c = 1'b1; c_val = a[4'd0 - sh]; end
           end else if (fn6[5:4] == 2'b10) begin
             res = a >> sh; if (sh != 4'd0) begin set_c = 1'b1; c_val = a[sh - 4'd1]; end
           end else if (fn6[5:4] == 2'b11) begin
@@ -520,14 +521,19 @@ module tempo_core #(
       // mailboxes: thread side (from the execute commit) then host side
       begin : mbox
         reg [2:0] hn, tn;
+        reg [1:0] hlast, tlast;
         hn = h2t_n; tn = t2h_n;
+        // pop and push in one cycle: pop needs n >= 1 and push n <= 3 on the
+        // pre-edge count (asserted below), so n - 1 fits two bits
+        hlast = h2t_n[1:0] - 2'd1;
+        tlast = t2h_n[1:0] - 2'd1;
         if (ex_commit && !ldi_phase[te] && op == OP_SYS && fn6 == SYS_HGET) begin
           h2t[0] <= h2t[1]; h2t[1] <= h2t[2]; h2t[2] <= h2t[3];
           hn = hn - 3'd1;
         end
         if (hp_h2t_v) begin
           // host checked "not full" on the pre-edge count
-          if (ex_commit && !ldi_phase[te] && op == OP_SYS && fn6 == SYS_HGET) h2t[h2t_n - 3'd1] <= hp_h2t;
+          if (ex_commit && !ldi_phase[te] && op == OP_SYS && fn6 == SYS_HGET) h2t[hlast] <= hp_h2t;
           else h2t[h2t_n[1:0]] <= hp_h2t;
           hn = hn + 3'd1;
         end
@@ -536,7 +542,7 @@ module tempo_core #(
           tn = tn - 3'd1;
         end
         if (ex_commit && !ldi_phase[te] && op == OP_SYS && fn6 == SYS_HPUT) begin
-          if (hp_t2h_pop) t2h[t2h_n - 3'd1] <= rx_;
+          if (hp_t2h_pop) t2h[tlast] <= rx_;
           else t2h[t2h_n[1:0]] <= rx_;
           tn = tn + 3'd1;
         end
@@ -567,6 +573,11 @@ module tempo_core #(
   always @(posedge clk) begin
     if (f_past && rst_n && $past(rst_n)) begin
       assert(h2t_n <= 3'd4 && t2h_n <= 3'd4);
+      // preconditions of the mailbox index arithmetic (hlast, tlast)
+      assert(!(ex_commit && !ldi_phase[te] && op == OP_SYS && fn6 == SYS_HGET && h2t_n == 3'd0));
+      assert(!(ex_commit && !ldi_phase[te] && op == OP_SYS && fn6 == SYS_HPUT && t2h_n == 3'd4));
+      assert(!(hp_h2t_v && h2t_n == 3'd4));
+      assert(!(hp_t2h_pop && t2h_n == 3'd0));
       for (ft_ = 0; ft_ < 4; ft_ = ft_ + 1) begin
         if ($past(te) != ft_[1:0]) begin
           for (fr_ = 0; fr_ < 8; fr_ = fr_ + 1)

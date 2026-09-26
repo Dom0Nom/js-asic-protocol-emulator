@@ -172,7 +172,7 @@ Host port pins: `ui[7]` `HCS_N`, `ui[5]` `HSCK`, `ui[6]` `HMOSI`, `uo[3]` `HMISO
 
 Threads `T0`..`T3`. Per thread: `PC` (10 bits), `r0`..`r7` (16 bits), flags `Z`, `C`, `N`, a sticky `LATE` flag, and a run bit.
 
-Thread `t` executes on cycles where `NOW mod 4 = t`. An instruction reads state as it is in that cycle and commits all its effects at the end of that cycle; checks and updates are one atomic step, so two threads can never both take the last queue slot, both pop one FIFO entry or both consume one event. A blocking instruction whose condition is false has no effect and is retried in the thread's next slot. `ldi` takes two slots; every other instruction takes one when it does not block.
+Thread `t` executes on cycles where `NOW mod 4 = t`. An instruction reads state as it is in that cycle and commits all its effects at the end of that cycle; checks and updates are one atomic step, so two threads can never both take the last queue slot, both pop one FIFO entry or both consume one event. A blocking instruction whose condition is false has no effect and is retried in the thread's next slot. `ldi` and `sti` take two slots; every other instruction takes one when it does not block.
 
 After the host sets a thread's run bit in cycle `c`, the thread first executes in the first cycle `e >= c + 3` with `e mod 4 = t`. Reset: all threads halted, `PC = 0`.
 

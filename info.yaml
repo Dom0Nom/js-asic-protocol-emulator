@@ -31,19 +31,19 @@ pinout:
   ui[2]: "IN10: general input"
   ui[3]: "IN11: general input"
   ui[4]: "IN12: general input"
-  ui[5]: "HMOSI: host SPI data in"
-  ui[6]: "HSCK: host SPI clock"
+  ui[5]: "HSCK: host SPI clock"
+  ui[6]: "HMOSI: host SPI data in"
   ui[7]: "HCS_N: host SPI chip select"
 
   # Outputs
   uo[0]: "OUT8: general output"
   uo[1]: "OUT9: general output"
   uo[2]: "OUT10: general output"
-  uo[3]: "OUT11: general output"
+  uo[3]: "HMISO: host SPI data out"
   uo[4]: "OUT12: general output"
   uo[5]: "OUT13: general output"
   uo[6]: "OUT14: general output"
-  uo[7]: "HMISO: host SPI data out"
+  uo[7]: "OUT11: general output"
 
   # Bidirectional pins
   uio[0]: "IO0: general bidirectional pin"

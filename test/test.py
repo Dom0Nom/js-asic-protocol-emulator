@@ -9,6 +9,28 @@ from tempo.models.uart import UartRx
 from tempo.models.spi import SpiFlashLike
 from tempo.models.i2c import I2cTarget
 
+
+@cocotb.test()
+async def test_register_banks_and_host_debug_reads(dut):
+    """Distinct values in every bank expose cross-thread address aliasing."""
+    lines = []
+    values = {}
+    for tid in range(4):
+        lines += [f".entry {tid}, t{tid}", f"t{tid}:"]
+        for reg in range(8):
+            value = ((tid + 1) * 0x1234 + reg * 0x101) & 0xFFFF
+            values[tid, reg] = value
+            lines.append(f"lc r{reg}, {value}")
+        lines.append("halt")
+    ls = Lockstep(dut, "\n".join(lines))
+    await ls.start()
+    await ls.boot()
+    await ls.run(200)
+    for (tid, reg), value in values.items():
+        read = ls.h.host.read_reg(tid, reg)
+        await ls.boot()
+        assert read.words(4) == [value], (tid, reg, value, read.rx)
+
 TX_SRC = """
         .include "tempo.inc"
         .equ PER, 16

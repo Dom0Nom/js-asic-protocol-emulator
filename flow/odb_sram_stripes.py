@@ -17,12 +17,15 @@
 #      column, then complete VPWR/VGND pairs within each region.
 #   4. Removes every tile stripe through the footprint and draws full-height
 #      replacements on the chosen columns, with M1↔M4 rail vias outside the
-#      macro; tidy() leaves one full-height box + pin per stripe x.
+#      macro; tidy() first leaves one full-height box + pin per stripe x.
+#   5. Cuts those straps/pins around Metal4 OBS, preserving separated VDD!
+#      and VDDARRAY! contacts instead of bridging their obstructed gap.
 import click
 import odb
 import os
 import re
 from reader import click_odb
+from pdn_geometry import cut_intervals, metal4_obstructions
 
 
 SRAM_PINS = {
@@ -673,6 +676,58 @@ def extend(reader, layer, min_pairs, lefs, grid_report_dir):
             f"added {added} SRAM-column stripe(s)"
         )
         tidy(net_name, swire, bpin, rails)
+
+        # tidy() joins each column into a full-height strap. The SRAM's
+        # VDD! and VDDARRAY! pins have an obstructed gap between them; a
+        # continuous strap crosses it (44 Magic obsm4/metal4 overlaps).
+        # Cut after tidy, preserving the upper/lower contacts and their
+        # existing rail vias outside the macro. PSM checks both pieces.
+        for inst in block.getInsts():
+            master = inst.getMaster()
+            if not master.isBlock() or not is_sram(master):
+                continue
+            path = LEF_PATHS[master.getName()]
+            with open(path, encoding="utf-8") as source:
+                rects, spacing = metal4_obstructions(source.read())
+            ib = inst.getBBox()
+            ox, oy = ib.xMin(), ib.yMin()
+            height = master.getHeight()
+            obs = []
+            for x0, y0, x1, y1 in rects:
+                if inst.getOrient() == "MX":
+                    low, high = oy + height - round(y1 * dbu), oy + height - round(y0 * dbu)
+                else:
+                    low, high = oy + round(y0 * dbu), oy + round(y1 * dbu)
+                obs.append((ox + round(x0 * dbu), low, ox + round(x1 * dbu), high))
+            margin = max(clearance, round((spacing + 0.05) * dbu))
+
+            def pieces(box):
+                blocked = [(y0, y1) for x0, y0, x1, y1 in obs
+                           if box.xMax() > x0 and box.xMin() < x1]
+                return cut_intervals(box.yMin(), box.yMax(), blocked, margin)
+
+            cut = 0
+            for box in list(vertical_m4(swire.getWires())):
+                parts = pieces(box)
+                if parts == [(box.yMin(), box.yMax())]:
+                    continue
+                x0, x1 = box.xMin(), box.xMax()
+                odb.dbSBox_destroy(box)
+                for low, high in parts:
+                    odb.dbSBox_create(swire, m, x0, low, x1, high, "STRIPE")
+                cut += 1
+            if bpin is not None:
+                for box in list(bpin.getBoxes()):
+                    if box.getTechLayer() is None or box.getTechLayer().getName() != layer:
+                        continue
+                    parts = pieces(box)
+                    if parts == [(box.yMin(), box.yMax())]:
+                        continue
+                    x0, x1 = box.xMin(), box.xMax()
+                    odb.dbBox_destroy(box)
+                    for low, high in parts:
+                        odb.dbBox_create(bpin, m, x0, low, x1, high)
+            print(f"[INFO] {inst.getName()}: {net_name}: cut {cut} column(s) around Metal4 OBS")
 
     # GeneratePDN checked the grid before the SRAM columns were connected,
     # so its violation counts describe an intermediate state. Check again.

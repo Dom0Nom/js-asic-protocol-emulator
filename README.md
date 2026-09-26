@@ -1,42 +1,52 @@
-![](../../workflows/gds/badge.svg) ![](../../workflows/docs/badge.svg) ![](../../workflows/test/badge.svg) ![](../../workflows/fpga/badge.svg)
+# Tempo protocol emulator
 
-# Tiny Tapeout Verilog Project Template
+Tempo is a programmable protocol processor for the [Jane Street ASIC
+competition](https://blog.janestreet.com/protocol-emulator-asic-competition/),
+targeting IHP 130 nm CMOS5L in 6×4 Tiny Tapeout tiles.
 
-- [Read the documentation for project](docs/info.md)
+Four threads share a 16-bit datapath and a 1024-word SRAM. Two full lanes and
+one lite lane move pins on independent timelines. Firmware supplies words,
+symbols and deadlines; lanes handle sampling, clock pulses and line coding.
+This lets one instruction set implement UART, SPI, I2C, JTAG, SWD, passive
+monitoring and edge capture. NRZI, stuffing and CRC are reusable settings;
+USB low-speed PHY tests exist, but USB enumeration is unfinished.
 
-## What is Tiny Tapeout?
+The verification compares every RTL pad and instruction commit with a Python
+cycle model. Independent target models check the protocols on the wire.
+Constrained-random programs and formal proofs cover the core's isolation and
+mailbox bounds. See [verification](docs/verification.md) and the
+[bug log](notes/bugs.md) for evidence and remaining work.
 
-Tiny Tapeout is an educational project that aims to make it easier and cheaper than ever to get your digital and analog designs manufactured on a real chip.
+The latest completed routed design fails slow-corner timing at the 50 MHz
+target. This is a design in progress; current area and timing results are in
+[notes/area.md](notes/area.md).
 
-To learn more and get started, visit https://tinytapeout.com.
+## Run the checks
 
-## Set up your Verilog project
+With Icarus Verilog installed and the project Python environment active:
 
-1. Add your Verilog files to the `src` folder.
-2. Edit the [info.yaml](info.yaml) and update information about your project, paying special attention to the `source_files` and `top_module` properties. If you are upgrading an existing Tiny Tapeout project, check out our [online info.yaml migration tool](https://tinytapeout.github.io/tt-yaml-upgrade-tool/).
-3. Edit [docs/info.md](docs/info.md) and add a description of your project.
-4. Adapt the testbench to your design. See [test/README.md](test/README.md) for more information.
+```sh
+cd tools
+python -m pytest -q tests/
+cd ../test
+make -B
+make -B COCOTB_TEST_MODULES=test_random RAND_SEEDS=100
+```
 
-The GitHub action will automatically build the ASIC files using [LibreLane](https://www.zerotoasiccourse.com/terminology/librelane/).
+The assembler and cycle model live in `tools/tempo/`, protocol firmware in
+`fw/`, RTL in `src/`, and the CPython/MicroPython host library in
+`host/tempo_host/`. After firmware changes, regenerate the host images with
+`python tools/gen_images.py` from the repository root.
 
-## Enable GitHub actions to build the results page
+## Use the chip
 
-- [Enabling GitHub Pages](https://tinytapeout.com/faq/#my-github-action-is-failing-on-the-pages-part)
+The [datasheet](docs/info.md) has the pin map, host protocol and a demo-board
+UART example. The [architecture](docs/architecture.md) specifies the ISA and
+lane registers. [Decisions](docs/decisions.md) record the design tradeoffs.
 
-## Resources
+The host SPI port loads programs entirely through Tiny Tapeout's standard
+pins. The demo-board transport uses the RP2350's hardware SPI0; a serial
+bridge provides PC access. No dedicated UART, SPI or I2C peripheral fixes
+which protocols the chip can run after fabrication.
 
-- [FAQ](https://tinytapeout.com/faq/)
-- [Digital design lessons](https://tinytapeout.com/digital_design/)
-- [Learn how semiconductors work](https://tinytapeout.com/siliwiz/)
-- [Join the community](https://tinytapeout.com/discord)
-- [Build your design locally](https://www.tinytapeout.com/guides/local-hardening/)
-
-## What next?
-
-- [Submit your design to the next shuttle](https://app.tinytapeout.com/).
-- Edit [this README](README.md) and explain your design, how it works, and how to test it.
-- Share your project on your social network of choice:
-  - LinkedIn [#tinytapeout](https://www.linkedin.com/search/results/content/?keywords=%23tinytapeout) [@TinyTapeout](https://www.linkedin.com/company/100708654/)
-  - Mastodon [#tinytapeout](https://chaos.social/tags/tinytapeout) [@matthewvenn](https://chaos.social/@matthewvenn)
-  - X (formerly Twitter) [#tinytapeout](https://twitter.com/hashtag/tinytapeout) [@tinytapeout](https://twitter.com/tinytapeout)
-  - Bluesky [@tinytapeout.com](https://bsky.app/profile/tinytapeout.com)
+Licensed under [Apache-2.0](LICENSE).
