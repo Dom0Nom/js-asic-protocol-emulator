@@ -8,6 +8,9 @@ testbench (the host code runs in a `cocotb.bridge` thread and the runners are
 
 Time on the host side is simulated time: `ticks_us` is the board cycle count
 converted at the board clock, and `sleep_us` runs the simulation.
+An optional call_overhead_us runs the live board before every SPI call,
+representing host preparation/scheduling cost. This is an assumed cost for
+sensitivity analysis, not a measurement of RP2350 or MicroPython latency.
 """
 
 import os
@@ -19,7 +22,10 @@ if HOST_DIR not in sys.path:
 
 
 class SimTransport:
-    def __init__(self, driver, run, run_until, board, clock_hz=50e6, record=None):
+    def __init__(self, driver, run, run_until, board, clock_hz=50e6, record=None,
+                 call_overhead_us=0):
+        if call_overhead_us < 0:
+            raise ValueError("host call overhead must be nonnegative")
         self.drv = driver
         self._run = run
         self._run_until = run_until
@@ -28,8 +34,12 @@ class SimTransport:
         self.record = record  # list of (request, response) for replay checks
         self.xfers = 0
         self.bytes = 0
+        self.call_overhead_us = call_overhead_us
+        self.call_overhead_cycles = int(round(call_overhead_us * clock_hz / 1e6))
 
     def xfer(self, data):
+        if self.call_overhead_cycles:
+            self._run(self.call_overhead_cycles)
         t = self.drv.xfer(data)
         limit = 64 * self.drv.half * (len(data) + 8) + 1000
         ok = self._run_until(lambda: t.done, limit)
@@ -49,17 +59,18 @@ class SimTransport:
         return int(self.board.cycle * 1e6 / self.clock_hz)
 
 
-def model_transport(h, record=None):
+def model_transport(h, record=None, call_overhead_us=0):
     """Transport over a tools/tempo Harness booted with boot="host"."""
-    return SimTransport(h.host, h.run, h.run_until, h.board, h.board.clock_hz, record)
+    return SimTransport(h.host, h.run, h.run_until, h.board, h.board.clock_hz, record,
+                        call_overhead_us)
 
 
-def cocotb_transport(ls, record=None):
+def cocotb_transport(ls, record=None, call_overhead_us=0):
     """Transport over a test/lockstep.py Lockstep. Call host code through
     `await cocotb_call(fn, *args)`."""
     from cocotb.task import resume
     return SimTransport(ls.h.host, resume(ls.run), resume(ls.run_until), ls.board,
-                        ls.board.clock_hz, record)
+                        ls.board.clock_hz, record, call_overhead_us)
 
 
 async def cocotb_call(fn, *args, **kw):

@@ -6,7 +6,7 @@ from tempo_host.serve import handle
 from tempo_host.cli import Cli
 
 link = board(pullups=(4, 5))
-assert ("spi", 0, 50000000 // 12, 22, 23, 36) in machine.log, machine.log
+assert ("spi", 0, 25000000 // 12, 22, 23, 36) in machine.log, machine.log
 st = link.status()
 assert ("xfer", bytes([7]) + bytes(9)) in machine.log
 t0 = link.t.ticks_us()

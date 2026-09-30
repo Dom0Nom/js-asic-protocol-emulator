@@ -145,3 +145,31 @@ def test_reloading_uart_does_not_forward_old_ring_contents():
     u = U.Uart(link)
     tx.send(b"\x99")
     assert u.read(1, timeout_us=2000) == b"\x99"
+
+
+def test_uart_terminal_overflow_reports_pending_loss_on_recovery():
+    """A full ring followed by silence has no later word to carry LOST."""
+    tx = UartTx("uio1", 1000000)
+    h, link = board(tx, pullups=("uio1",))
+    u = U.Uart(link, baud=1000000)
+    sent = bytes((i * 13 + 7) & 255 for i in range(1024))
+    tx.send(sent)
+    # Do not poll while twice the SRAM ring capacity arrives. Then leave
+    # ample idle time, so a marker cannot be supplied by another character.
+    h.run(len(sent) * 10 * 50 + 1000)
+    words = []
+    for _ in range(160):
+        chunk = u.read_raw()
+        if not chunk:
+            break
+        words.extend(chunk)
+    else:
+        pytest.fail("UART ring did not drain")
+    assert 0 < len(words) < len(sent)
+    assert bytes(w & 255 for w in words) == sent[:len(words)]
+    assert not any(w & (U.FE | U.PE | U.LOST) for w in words)
+    # Existing firmware retains the pending loss internally during silence.
+    # The first successfully stored recovery character reports that gap.
+    tx.send(b"\xa5\x3c")
+    assert link.get(2, timeout_us=20000) == [U.LOST | 0xA5, 0x3C]
+    link.check()

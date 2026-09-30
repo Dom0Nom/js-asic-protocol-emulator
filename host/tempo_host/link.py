@@ -79,15 +79,19 @@ def _words(b):
     return [(b[i] << 8) | b[i + 1] for i in range(0, len(b) - 1, 2)]
 
 
+CHIP_CLOCK_HZ = 25000000  # declared clock: info.yaml clock_hz, CLOCK_PERIOD 40 ns
+
+
 class Link:
     """Transaction-level access to one Tempo chip."""
 
-    def __init__(self, transport, clock_hz=50000000):
+    def __init__(self, transport, clock_hz=None):
         """clock_hz: the chip's clock as the board generates it. Every rate
         the library computes (baud, SCK, I2C timing, timestamps) uses it, so
-        a die that needs a slower clock keeps exact protocol rates."""
+        a die that needs a slower clock keeps exact protocol rates. Defaults
+        to the transport's clock, else the declared chip clock."""
         self.t = transport
-        self.clock_hz = clock_hz
+        self.clock_hz = int(clock_hz or getattr(transport, "clock_hz", None) or CHIP_CLOCK_HZ)
         self.image = None
         self.errors_seen = []
 

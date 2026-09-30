@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """I2C master: bus scan, register access, 24Cxx EEPROMs, bus recovery.
 
-Runs the "i2c" firmware image (fw/i2c.s) on lane 3. Timing per NXP UM10204
+Runs the "i2c" firmware image (fw/i2c.s) on lane 2. Timing per NXP UM10204
 (see docs/specs.md): the bit slot is split so that SCL low and high times
 meet tLOW/tHIGH of the chosen mode (slots scale with the link's clock).
 """

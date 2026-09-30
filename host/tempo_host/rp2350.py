@@ -22,7 +22,7 @@ import time
 
 from machine import Pin, SPI
 
-from .link import Link
+from .link import CHIP_CLOCK_HZ, Link
 
 GPIO_SCK, GPIO_MOSI, GPIO_MISO, GPIO_CS = 22, 23, 36, 24
 GPIO_UIO = (25, 26, 27, 28, 29, 30, 31, 32)  # uio[0..7]
@@ -30,7 +30,7 @@ GPIO_UI = (17, 18, 19, 20, 21, 22, 23, 24)   # ui_in[0..7]
 
 
 class Rp2350Transport:
-    def __init__(self, clock_hz=50000000, sck_div=12):
+    def __init__(self, clock_hz=CHIP_CLOCK_HZ, sck_div=12):
         """clock_hz: the project clock the board generates. The SPI clock is
         clock_hz / sck_div (sck_div >= 12, the host port's limit); the
         RP2350 rounds it down to what its prescaler can make."""
@@ -61,7 +61,7 @@ class Rp2350Transport:
         return self._acc
 
 
-def board(project="tt_um_dom0nom_protoemu", clock_hz=50000000, pullups=(), inputs=()):
+def board(project="tt_um_dom0nom_protoemu", clock_hz=CHIP_CLOCK_HZ, pullups=(), inputs=()):
     """Select Tempo on the demo board, start its clock, reset it, and return
     a Link. pullups: uio indices to pull up with the RP2350's internal
     pull-ups (the board has none on uio; I2C needs them, or external 2.2k-4.7k

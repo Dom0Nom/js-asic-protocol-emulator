@@ -155,7 +155,7 @@ rbyte:  tx   l2, r4, 9, x
         and  r5, r5, r2
         ret
 
-; parameter block, patched by the host (host/tempo/i2c.py)
+; parameter block, patched by the host (host/tempo_host/i2c.py)
 P_PINS:    .word NOPIN << 12 | (UIO0 + 5) << 8 | (UIO0 + 4) << 4 | (UIO0 + 4)
 P_SLOT:    .word 125
 P_CR:      .word 55

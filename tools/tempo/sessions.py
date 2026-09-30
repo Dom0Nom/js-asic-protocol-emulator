@@ -19,6 +19,7 @@ from .transport import model_transport
 class RecordingTransport:
     def __init__(self, inner):
         self.t = inner
+        self.clock_hz = inner.clock_hz
         self.events = []
 
     def xfer(self, data):
@@ -93,7 +94,7 @@ SCENARIOS = {
 
 
 def record(name):
-    """Run one scenario on the model. Returns (events, output lines)."""
+    """Run one scenario on the model. Returns (events, output lines, clock)."""
     from tempo_host.cli import Cli
     from tempo_host.link import Link
     setup, lines = SCENARIOS[name]
@@ -105,11 +106,12 @@ def record(name):
     for ln in lines:
         out.append("> " + ln)
         cli.run(ln)
-    return rt.events, out
+    return rt.events, out, rt.clock_hz
 
 
 def save(name, path):
-    events, out = record(name)
+    events, out, clock_hz = record(name)
     with open(path, "w") as f:
-        json.dump({"name": name, "commands": SCENARIOS[name][1], "events": events, "output": out}, f)
+        json.dump({"name": name, "clock_hz": clock_hz, "commands": SCENARIOS[name][1],
+                   "events": events, "output": out}, f)
     return out
