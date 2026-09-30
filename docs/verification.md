@@ -325,4 +325,4 @@ Longer formal runs, 2026-09-30 (PC threads left idle by single-threaded detailed
 
 With these, every core nonvacuity cover has a solver witness. The lane timing-independence theorem remains bounded at 14 steps for the constrained tape family.
 
-Gate-level caveat: with `GL_TEST` the testbench cannot see internal commit signals, so the RTL-vs-model commit lockstep is inactive in gate-level runs ("0 commits matched" in `runs/gl_synth_0930.log`). Gate-level runs are checked only by the independent wire-level protocol models.
+Gate-level lockstep scope (`test/lockstep.py`): in gate-level runs the internal instruction-commit comparison is off, because the netlist has no `commit_o` to probe ("0 commits matched" in `runs/gl_synth_0930.log`). The per-cycle pad comparison against the Python cycle model stays on (every output value and output enable, e.g. 6,881 cycles in the UART boot case), alongside the independent wire-level protocol models.
