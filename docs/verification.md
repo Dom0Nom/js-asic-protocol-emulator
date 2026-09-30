@@ -324,3 +324,5 @@ Longer formal runs, 2026-09-30 (PC threads left idle by single-threaded detailed
 | `lane_miter.sby` | `bmc`, depth 60 | Timed out at 5000 s while checking step 15; no counterexample through step 14. Unchanged from 2026-09-26. | 5000 s | PC `runs/fmiter/sby.log`; local `runs/formal_0930_long_fmiter.log` has only the timeout code |
 
 With these, every core nonvacuity cover has a solver witness. The lane timing-independence theorem remains bounded at 14 steps for the constrained tape family.
+
+Gate-level caveat: with `GL_TEST` the testbench cannot see internal commit signals, so the RTL-vs-model commit lockstep is inactive in gate-level runs ("0 commits matched" in `runs/gl_synth_0930.log`). Gate-level runs are checked only by the independent wire-level protocol models.
