@@ -24,12 +24,18 @@ COMPILE_ARGS    += -DGL_TEST
 COMPILE_ARGS    += -DFUNCTIONAL
 COMPILE_ARGS    += -DSIM
 VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13cmos5l/libs.ref/sg13cmos5l_io/verilog/sg13cmos5l_io.v
+VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/verilog/sg13cmos5l_udp.v
 VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/verilog/sg13cmos5l_stdcell.v
 
 # this gets copied in by the GDS action workflow
 VERILOG_SOURCES += $(PWD)/gate_level_netlist.v
 VERILOG_SOURCES += $(PWD)/sram/RM_IHPSG13_1P_1024x16_c2_bm_bist.v $(PWD)/sram/RM_IHPSG13_1P_core_behavioral_bm_bist.v
 
+endif
+
+# NODUMP=yes skips the FST dump (gate-level runs are much faster without it)
+ifeq ($(NODUMP),yes)
+COMPILE_ARGS    += -DNODUMP
 endif
 
 # Allow sharing configuration between design and testbench via `include`:

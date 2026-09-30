@@ -513,3 +513,112 @@ async def test_spi_monitor_preserves_transactions_during_startup(dut):
     assert [(bytes(t["mosi"]), bytes(t["miso"][4:]), t["flags"]) for t in last] == [
         (bytes([3, 0, 1, 200]) + bytes(6), bytes(mem[0x100 + 200:][:6]), 0)], last
     assert not ls.board.contention
+
+
+@cocotb.test()
+async def test_uart_receives_while_host_is_busy(dut):
+    """A simulated 100 us host-call cost must advance RTL receive, too."""
+    ls = Lockstep(dut, None, pullups={"uio1"})
+    await ls.start()
+    tx = ls.attach(UartTx("uio1", 1000000))
+    link = Link(cocotb_transport(ls, call_overhead_us=100))
+    data = bytes(range(32))
+
+    def host():
+        uart = uart_mod.Uart(link, baud=1000000)
+        tx.send(data)
+        return uart.read(len(data), timeout_us=20000)
+
+    assert await cocotb_call(host) == data
+    await cocotb_call(link.check)
+    assert not ls.board.contention
+    dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")
+
+
+@cocotb.test()
+async def test_demo_resident_multibus_with_busy_host_and_memory(dut):
+    """Three wire protocols overlap while T2 accesses SRAM/scratch."""
+    from tempo.demo_checks import (PAYLOAD, LoggedI2cTarget, LoggedUart, assert_overlap,
+                                   observe_stretch_holds, prepare)
+    from tempo.models.i2c import I2cBusMonitor
+    from tempo.models.linecode import ManchesterStream
+
+    ls = Lockstep(dut, None, pullups={"uio4", "uio5"})
+    await ls.start()
+    target = ls.attach(LoggedI2cTarget("uio5", "uio4", 0x68,
+                                       regs=bytearray(range(256)), mode="fast", stretch_cycles=300))
+    monitor = ls.attach(I2cBusMonitor("uio5", "uio4", mode="fast"))
+    holds = observe_stretch_holds(ls.board, "uio5")
+    link = Link(cocotb_transport(ls, call_overhead_us=100))
+    im = await cocotb_call(lambda: prepare(link, "demo_multibus"))
+    uart = ls.attach(LoggedUart("uio0", 1000000))
+    coded = ls.attach(ManchesterStream("uio1", PAYLOAD))
+
+    def host():
+        link.set_pc(0, im["consts"]["uart_run"])
+        link.set_pc(1, im["consts"]["mc_run"])
+        link.control(run_set=3)
+        link.put([1 << 8])
+        for byte in [0x68 << 1, 0x10, 0xAB, 0xCD]:
+            link.put([3 << 8 | byte])
+            assert link.get(1) == [0]
+        link.put([2 << 8])
+
+    await cocotb_call(host)
+    await ls.run(5000)
+    assert target.regs[0x10:0x12] == b"\xab\xcd"
+    assert not target.violations and not monitor.violations
+    assert len(uart.bytes) > 10 and not uart.errors
+    assert bytes(uart.bytes) == (b"\x55\xaa" * ((len(uart.bytes) + 1) // 2))[:len(uart.bytes)]
+    assert all(b - a == 500 for a, b in zip(uart.starts, uart.starts[1:]))
+    assert coded.frames and all(f.checked_cycles == 1600 for f in coded.frames)
+    assert not coded.errors
+    overlaps = assert_overlap(uart, coded, target, holds)
+
+    def inspect():
+        assert link.status().run & 12 == 12
+        link.halt(4)
+        count, scratch = link.read_reg(2, 2), link.read_reg(2, 3)
+        assert count > 10 and ((count - scratch) & 0xFFFF) in (0, 1)
+        assert link.read_reg(2, 4) == 0xA596
+        link.check()
+
+    await cocotb_call(inspect)
+    assert not ls.board.contention
+    dut._log.info(f"three-protocol stretched-clock overlap: {overlaps[0]}; "
+                 f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")
+
+
+@cocotb.test()
+async def test_demo_manchester_frame_scheduled_across_counter_wrap(dut):
+    from tempo.demo_checks import PAYLOAD, prepare
+    from tempo.models.linecode import ManchesterFrame
+
+    # Align the actual cycle phase after loading and setting PC. One frame
+    # straddles the wrap; the second NOW + 1000 start deadline wraps itself.
+    for phase in (64000, 65000):
+        ls, link = await setup(dut)
+        im = await cocotb_call(lambda: prepare(link, "manchester"))
+        coded = ls.attach(ManchesterFrame("uio1", PAYLOAD))
+        await cocotb_call(lambda: link.set_pc(1, im["consts"]["mc_run"]))
+        await ls.run((phase - ls.board.cycle) % 65536)
+        await cocotb_call(lambda: link.control(run_set=2))
+        await ls.run(4000)
+        assert coded.done and coded.checked_cycles == 1600 and not coded.errors
+        assert coded.checked_idle_cycles == 150
+
+        def inspect():
+            assert not link.status().run & 2
+            deadline = link.read_reg(1, 6)
+            assert ((coded.start_cycle - deadline) & 0xFFFF) == 2
+            if phase == 65000:
+                assert ((deadline - 1000) & 0xFFFF) > 64535 and deadline < 1000
+            else:
+                assert (coded.start_cycle & 0xFFFF) > 65536 - 1600
+                assert coded.start_cycle // 65536 != (coded.start_cycle + 1599) // 65536
+            link.check()
+
+        await cocotb_call(inspect)
+        assert not ls.board.contention
+        dut._log.info(f"Manchester payload, idle and NOW16 phase {phase}: "
+                     f"{ls.cycles} cycles, {ls.commits} commits matched")
