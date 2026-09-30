@@ -1,12 +1,15 @@
 [tasks]
 prove
 bmc
+bmc_deep
 
 [options]
 prove: mode prove
 prove: depth 8
 bmc: mode bmc
 bmc: depth 30
+bmc_deep: mode bmc
+bmc_deep: depth 50
 
 [engines]
 smtbmc bitwuzla
