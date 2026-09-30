@@ -155,3 +155,65 @@ def program(seed, n=40, threads=4):
         lines.append(f"t{t}_start:")
         lines.extend(thread_block(rng, t, n))
     return "\n".join(lines) + "\n"
+
+
+def blocking_program(seed, threads=4, body=12):
+    """Program biased toward the blocking instructions (wev, hget, rx, hput).
+
+    One or two producer threads loop forever: a random delay, then sev on a
+    small per-seed event set, rxn on a small per-seed lane set, or hput.
+    The other threads loop over unguarded wev/hget/rx with random delays
+    (0 to 24 cycles), so each op sometimes finds its source already pending
+    and sometimes blocks, and small event and lane sets make several
+    threads block on the same source. hget is fed by the host driver.
+    Producers never block indefinitely, so consumers keep making progress.
+    """
+    rng = random.Random(seed ^ 0xB10C)
+    events = rng.sample(range(8), rng.randint(1, 3))
+    lanes = rng.sample(range(3), rng.randint(1, 2))
+    producers = set(rng.sample(range(threads), rng.randint(1, 2)))
+    lines = []
+
+    def delay(L, tag):
+        k = rng.choice([0, 0, 1, 2, 3, 5, 8, 13, 24])
+        if k == 0:
+            return
+        if rng.random() < 0.5:
+            L += ["now r6", f"addi r6, {k}", "waitt r6"]
+        else:
+            L += ["nop"] * min(k, 4)
+
+    for t in range(threads):
+        lines += [f".entry {t}, b{t}_start", f"b{t}_start:"]
+        L = []
+        if t in producers:
+            for ln in lanes:
+                pins = 15 | rng.randint(8, 12) << 4 | 15 << 8 | 15 << 12  # I on a noisy ui pin
+                L += [f"lc r7, {pins}", f"lw l{ln}, pins, r7",
+                      f"li r7, {rng.randint(1, 3)}", f"lw l{ln}, len0, r7", f"lw l{ln}, len1, r7"]
+        L.append(f"b{t}_loop:")
+        for k in range(body):
+            delay(L, k)
+            c = rng.random()
+            if t in producers:
+                if c < 0.55:
+                    L.append(f"sev {rng.choice(events)}")
+                elif c < 0.9:
+                    L.append(f"rxn l{rng.choice(lanes)}, {rng.randint(1, 8)}")
+                else:
+                    L += [f"li r1, {rng.randint(0, 255)}", "hput r1"]
+            else:
+                if c < 0.4:
+                    L.append(f"wev {rng.choice(events)}")
+                elif c < 0.65:
+                    L.append(f"hget r{rng.randint(0, 5)}")
+                elif c < 0.9:
+                    L.append(f"rx r{rng.randint(0, 5)}, l{rng.choice(lanes)}")
+                elif c < 0.95:
+                    L += [f"lc r5, {sum(1 << (10 + e) for e in events if e < 6) | 1 << 8}",
+                          "now r6", f"addi r6, {rng.randint(1, 30)}", "wany r6, r5"]
+                else:
+                    L.append(f"hput r{rng.randint(0, 5)}")
+        L.append(f"j b{t}_loop")
+        lines += L
+    return "\n".join(lines) + "\n"
