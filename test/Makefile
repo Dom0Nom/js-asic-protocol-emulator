@@ -33,6 +33,11 @@ VERILOG_SOURCES += $(PWD)/sram/RM_IHPSG13_1P_1024x16_c2_bm_bist.v $(PWD)/sram/RM
 
 endif
 
+# SDF=<file> back-annotates gate-level timing (with GATES=yes)
+ifneq ($(SDF),)
+COMPILE_ARGS    += -gspecify -DSDF_FILE=\"$(SDF)\"
+endif
+
 # NODUMP=yes skips the FST dump (gate-level runs are much faster without it)
 ifeq ($(NODUMP),yes)
 COMPILE_ARGS    += -DNODUMP

@@ -48,7 +48,7 @@ class Lockstep:
 
     async def start(self):
         d = self.dut
-        cocotb.start_soon(Clock(d.clk, 20, unit="ns").start())
+        cocotb.start_soon(Clock(d.clk, int(os.environ.get("TEMPO_CLK_NS", "20")), unit="ns").start())
         d.ena.value = 1
         d.ui_in.value = 0
         d.uio_in.value = 0
