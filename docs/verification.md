@@ -326,3 +326,20 @@ Longer formal runs, 2026-09-30 (PC threads left idle by single-threaded detailed
 The five thread covers (`core_cover.sby` task `cover`) also completed in a separate run: `DONE (PASS)`, all five reached at steps 36-39, 921 s (`runs/formal_0930_long_fcov_thread.log`). With these, all nine core nonvacuity covers have solver witnesses in completed runs. The lane timing-independence theorem remains bounded at 14 steps for the constrained tape family.
 
 Gate-level lockstep scope (`test/lockstep.py`): in gate-level runs the internal instruction-commit comparison is off, because the netlist has no `commit_o` to probe ("0 commits matched" in `runs/gl_synth_0930.log`). The per-cycle pad comparison against the Python cycle model stays on (every output value and output enable, e.g. 6,881 cycles in the UART boot case), alongside the independent wire-level protocol models.
+
+### Gate level on the routed netlist, 2026-09-30
+
+Netlist: `runs/pc/runs/wokwi/final/nl/tt_um_dom0nom_protoemu.nl.v` from the `c3ffca5` harden (`final/commit_id.json` names `c3ffca5`; sha256 `4a099941...`, 76,376 cell instances including fill). All ten cases pass, zero-delay, with the per-cycle pad comparison against the Python model and the independent wire models (`runs/gl_route_g1.log` .. `g4.log`; the trailing `rc=2` in g2/g3 is a shell syntax error from editing `tools/gl_run.sh` after all their tests had passed):
+
+| Case | Protocol | Wall time |
+|---|---|---|
+| `test_host_boot_and_uart_tx` | host boot, UART TX | 13 s |
+| `test_uart_rx_fast_sender` | UART RX, 2% fast sender | 15 s |
+| `test_uc1_uart_autobaud_console` | UART console, autobaud | 822 s |
+| `test_spi_mode3_flash_read` | SPI mode 3 flash | 23 s |
+| `test_spi_mode0_jedec` | SPI mode 0 JEDEC ID | 21 s |
+| `test_uc3_spi_flash_programmer` | SPI flash program/verify | 607 s |
+| `test_i2c_write_read_with_stretching` | I2C with clock stretching | 66 s |
+| `test_uc2_i2c_bringup` | I2C scan, EEPROM, RTC | 688 s |
+| `test_demo_resident_multibus_with_busy_host_and_memory` | UART + Manchester + I2C + compute in one image | 681 s |
+| `test_demo_manchester_frame_scheduled_across_counter_wrap` | Manchester line code from firmware | 189 s |
