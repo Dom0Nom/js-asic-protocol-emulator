@@ -312,3 +312,5 @@ about are reachable under the same assumptions. The HGET and T2H-pop
 preconditions remain without a witness.
 
 Core invariants re-proved this session on the harden RTL: `formal/core.sby` task `prove`, k-induction depth 8, `smtbmc bitwuzla`, PASS (basecase and induction), 7 s (`runs/formal_0930_core_prove.log`). This is an unbounded proof of the asserted core invariants because the induction step starts from any state satisfying them. The depth-30 `bmc` task adds nothing about running threads (they cannot start before step 36; `notes/bugs.md` 53).
+
+Committed-tree reruns, 2026-09-30: from a clean worktree at `fbd3292` (header line records commit and zero dirty files), RTL suite 27/27 (`runs/rtl_fbd3292.log`, 2555 s) and Python suite 193/193 (`runs/py_fbd3292.log`, 915 s). `src/`, `test/`, `tools/`, `host/` and `fw/` at later commits differ only in docs and `tools/bench_rates.py`'s head fallback. Complete-source export of `fbd3292`: 165 files; in the export, image check passes, 193/193 Python tests, three cocotb protocol cases pass, `bench_rates.py` runs without git history (`runs/export_fbd3292.log`).
