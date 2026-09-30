@@ -20,7 +20,7 @@ ROOT = os.path.join(os.path.dirname(__file__), "..")
 FW = os.path.join(ROOT, "fw")
 OUT = os.path.join(ROOT, "host", "tempo_host", "images.py")
 
-IMAGES = ["reset", "i2c", "spi", "uart", "autobaud", "jtag", "swd", "la", "trigger", "i2cmon", "spimon", "i2ctarget", "gpio"]
+IMAGES = ["reset", "i2c", "spi", "uart", "autobaud", "jtag", "swd", "la", "trigger", "i2cmon", "spimon", "i2ctarget", "gpio", "manchester", "demo_multibus"]
 
 
 def build(name):
