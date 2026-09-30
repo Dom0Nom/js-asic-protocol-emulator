@@ -76,5 +76,11 @@ module lane_anchor (input wire clk);
   always @* begin
     cover(rst_n && now == T && hit && !late);
     cover(rst_n && hit && !seen && late);
+    // nonvacuity of the three assertions: the emit is queued and waiting
+    // before T (never early is tested with the level pending), and the
+    // on-time antecedent (emit queued by T-2) is reached, with no slack.
+    cover(rst_n && now < T && p == 3'd4 && !hit);
+    cover(rst_n && now == T && done_at <= T - 16'd2);
+    cover(rst_n && now == T && done_at == T - 16'd2 && hit && !late);
   end
 endmodule

@@ -1,0 +1,25 @@
+[tasks]
+cover
+cover_host
+
+[options]
+mode cover
+depth 90
+vcd off
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+exec -- sh core_nv_gen.sh tempo_core.v tempo_core_nv.v
+cover: read_verilog -formal -DFORMAL -I. tempo_core_nv.v tempo_host.v lane_stub.v
+cover_host: read_verilog -formal -DFORMAL -DCORE_NV_HOST -I. tempo_core_nv.v tempo_host.v lane_stub.v
+prep -top tempo_core
+
+[files]
+../src/tempo_core.v
+../src/tempo_host.v
+../src/tempo_isa.vh
+lane_stub.v
+core_nv.vh
+core_nv_gen.sh

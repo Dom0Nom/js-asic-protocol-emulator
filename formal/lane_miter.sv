@@ -1,14 +1,16 @@
-// Timing-independence theorem for one lane (docs/verification.md).
+// Scoped timing-independence claim for one lane (docs/verification.md).
 //
 // Two copies of tempo_lane see the same input pins and the same command
 // tape, but each copy pushes the next tape entry at times chosen freely by
 // the solver. The tape starts with a start time T and ends with an emit
 // (which ends the frame). Claim: once both copies have begun the frame,
-// their pins are identical on every cycle, unless one of them has raised
+// their internal drive states and ownership are identical on every cycle,
+// unless one of them has raised
 // LATE (start time missed) or UNDER (ran out of commands inside the frame).
 // Thread scheduling, stalls and host traffic only change *when* commands
 // are pushed, so this is the property that makes pin timing independent of
-// firmware timing.
+// firmware timing for this constrained tape. This is not a completed
+// proof or a check of the chip's pad resolver.
 
 module lane_miter (input wire clk);
   localparam N = 6;  // tape length
@@ -90,10 +92,43 @@ module lane_miter (input wire clk);
       .running_o(runb));
 
   reg started_a = 1'b0, started_b = 1'b0;
+  reg payload_skew_seen = 1'b0;
+  reg driven_seen = 1'b0;
+  reg payload_low_seen = 1'b0, payload_high_seen = 1'b0;
+  wire payload_push_a = push_a && pa >= 3'd2 && pa <= 3'd4;
+  wire payload_push_b = push_b && pb >= 3'd2 && pb <= 3'd4;
+  wire has_tx = `KIND(2) == 3'd0 || `KIND(3) == 3'd0 || `KIND(4) == 3'd0;
   always @(posedge clk) begin
     if (rst_n && runa) started_a <= 1'b1;
     if (rst_n && runb) started_b <= 1'b1;
+    if (rst_n && ((payload_push_a != payload_push_b) ||
+                 (payload_push_a && payload_push_b && pa != pb)))
+      payload_skew_seen <= 1'b1;
+    if (rst_n && runa && runb && oa[0] && ob[0] && da == 2'b11 && db == 2'b11)
+      driven_seen <= 1'b1;
+    // Before either EOF is accepted, enabled low/high states cannot come
+    // solely from the final emit. The stronger cover uses TX/LW/TX payload:
+    // the intervening LW can configure a symbol before the second TX runs.
+    if (rst_n && started_a && started_b && runa && runb && pa < N && pb < N &&
+        oa[0] && ob[0] && da[1] && db[1]) begin
+      if (!da[0] && !db[0]) payload_low_seen <= 1'b1;
+      if ( da[0] &&  db[0]) payload_high_seen <= 1'b1;
+    end
   end
+
+`ifdef MITER_HINT
+  // Witness-search hint only (cover_hint task): pin the tape to the one used
+  // by check_miter_trace.py. It satisfies every tape assumption above, so a
+  // cover reached here is reachable in the unconstrained miter too. Push
+  // times and input pins stay free. Never use this define for BMC.
+  always @* begin
+    assume(kind_v == {3'd2, 3'd0, 3'd3, 3'd0, 3'd4, 3'd3});
+    assume(data_v == {16'h0091, 16'd15, 16'hC000, 16'd0, 16'd20, 16'd8});
+    assume(n_v == {5'd1, 5'd4, 5'd1, 5'd4, 5'd1, 5'd1});
+    assume(fl_v == 18'd0);
+    assume(rg_v == {4'd0, 4'd0, 4'd5, 4'd0, 4'd0, 4'd15});
+  end
+`endif
 
   wire bad_a = st_a[5] | st_a[6];  // LATE, UNDER
   wire bad_b = st_b[5] | st_b[6];
@@ -104,5 +139,14 @@ module lane_miter (input wire clk);
       assert(ca == cb);
       assert(oa == ob);
     end
+    // Nonvacuity requires both executions to reach the driven frame and
+    // finish the complete tape without excluding a timing failure. The
+    // stronger witness also requires distinct payload enqueue schedules.
+    cover(rst_n && started_a && started_b && has_tx && driven_seen &&
+          pa == N && pb == N && ida && idb && !bad_a && !bad_b);
+    cover(rst_n && started_a && started_b && driven_seen && payload_skew_seen &&
+          `KIND(2) == 3'd0 && `KIND(3) == 3'd3 && `KIND(4) == 3'd0 &&
+          payload_low_seen && payload_high_seen &&
+          pa == N && pb == N && ida && idb && !bad_a && !bad_b);
   end
 endmodule
