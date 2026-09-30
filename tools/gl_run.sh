@@ -8,7 +8,8 @@ ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 NL=$(cd "$(dirname "$1")" && pwd)/$(basename "$1"); TAG=$2; TESTS=$3; MODS=${4:-test,test_usecases}
 GL=$ROOT/runs/gl; D=$GL/work_$TAG
 if [ -z "${PDK_ROOT:-}" ]; then
-  mkdir -p "$GL/pdkroot"; ln -sfn "$ROOT/pdk" "$GL/pdkroot/ihp-sg13cmos5l"; PDK_ROOT=$GL/pdkroot
+  mkdir -p "$GL/pdkroot"; [ -e "$GL/pdkroot/ihp-sg13cmos5l" ] || ln -s "$ROOT/pdk" "$GL/pdkroot/ihp-sg13cmos5l" 2>/dev/null || true
+  PDK_ROOT=$GL/pdkroot
 fi
 export PDK_ROOT
 rm -rf "$D"; mkdir -p "$D"
