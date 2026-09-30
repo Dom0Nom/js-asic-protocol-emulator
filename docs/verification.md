@@ -88,12 +88,12 @@ are recorded in `notes/progress.md`.
 
 Results:
 
-- `core.sby`, task `prove`: barrel isolation, mailbox bounds, valid simultaneous mailbox indices proven by k-induction (depth 5, bitwuzla) on the index-width-fixed core, 2026-09-26. Task `bmc` (depth 30) also passes on the final core. Lanes are unconstrained stubs, so the core properties hold for any lane behaviour.
+- `core.sby`, task `prove`: barrel isolation, mailbox bounds, valid simultaneous mailbox indices proven by k-induction (depth 8, bitwuzla), re-run PASS on 2026-09-30 (`runs/formal_0930_core_prove.log`). The proof covers only these asserted core invariants, with lanes replaced by unconstrained stubs, so they hold for any lane behaviour. Task `bmc` (depth 30) passes but is vacuous over thread execution: threads cannot start before step 36 (`notes/bugs.md` 53).
 - `lane_miter.sv`: the last run found no counterexample through step 14 and timed out at step 15. The timing-independence theorem remains unproven; it is not a passing depth-60 result.
 - `lane_anchor.sv` defines a separate short anchored-emit property and
-  on-time/late cover goals. No completed current proof or cover result is
-  claimed here. A reachable cover declaration alone is not evidence that
-  the solver reached it. The miter now declares completion goals requiring
+  on-time/late cover goals. Its safety result is BMC depth 40 (bounded, not
+  a proof); its five covers were reached by the solver on 2026-09-30
+  (`runs/formal_0930_anchor_cover.log`). The miter now declares completion goals requiring
   both full tapes to finish, at least one TX, enabled-high lane output and
   no LATE/UNDER. The stronger goal requires a TX/LW/TX payload, distinct
   enqueue schedules specifically for entries 2..4, and enabled low/high
@@ -117,8 +117,9 @@ Results:
   (`runs/goal_miter_task_engine_check.log`).
   Task-tag behavior is described in the
   [SBY reference](https://symbiyosys.readthedocs.io/en/latest/reference.html#tasks-section).
-  No solver witness has been obtained. They remain requirements before a
-  passing safety result can rule out vacuity.
+  Solver witnesses for both miter covers were obtained on 2026-09-30 (see
+  "Formal witnesses and nonvacuity, 2026-09-30" below; traces in
+  `runs/formal_0930_witness/`). Safety remains bounded at step 14.
 
 Run with `tools/pc.sh formal <job.sby> [task]`, which ships `formal/` and `src/` to the PC without touching a harden in progress.
 
