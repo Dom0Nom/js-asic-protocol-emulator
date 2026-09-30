@@ -18,8 +18,9 @@
 #   4. Removes every tile stripe through the footprint and draws full-height
 #      replacements on the chosen columns, with M1↔M4 rail vias outside the
 #      macro; tidy() first leaves one full-height box + pin per stripe x.
-#   5. Cuts those straps/pins around Metal4 OBS, preserving separated VDD!
-#      and VDDARRAY! contacts instead of bridging their obstructed gap.
+#   5. Cuts those straps around Metal4 OBS, preserving separated VDD!
+#      and VDDARRAY! contacts instead of bridging their obstructed gap. A cut
+#      column is removed from the power port (TT requires full-height ports).
 import click
 import odb
 import os
@@ -723,10 +724,10 @@ def extend(reader, layer, min_pairs, lefs, grid_report_dir):
                     parts = pieces(box)
                     if parts == [(box.yMin(), box.yMax())]:
                         continue
-                    x0, x1 = box.xMin(), box.xMax()
+                    # Tiny Tapeout's pin check requires every power port
+                    # rectangle to reach both die edges, so a cut column stays
+                    # a stripe (tied in through the rails) but leaves the port.
                     odb.dbBox_destroy(box)
-                    for low, high in parts:
-                        odb.dbBox_create(bpin, m, x0, low, x1, high)
             print(f"[INFO] {inst.getName()}: {net_name}: cut {cut} column(s) around Metal4 OBS")
 
     # GeneratePDN checked the grid before the SRAM columns were connected,
