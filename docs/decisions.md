@@ -10,7 +10,13 @@ Why not B: smallest and most verifiable, but one thread cannot run concurrent pr
 
 Why not A: four fetches per cycle rule out a shared SRAM, program space stays at tens of instructions, and several public entries are already PIO variants.
 
-Why Tempo: its one idea no competitor has is that pin timing is structurally independent of instruction timing, and that can be stated and proved (timing-independence theorem). The symbol table makes line codes data instead of code. The barrel makes one single-port SRAM enough for four threads.
+Why Tempo: the design separates lane timelines from instruction scheduling,
+uses a symbol table to describe line codes as data, and shares one
+single-port SRAM among four barrel threads. Timing independence is an
+intended, conditional guarantee that can be checked with a miter; its
+all-mode proof is unfinished. This combination is the submission's focus,
+not a verified claim that no competing architecture shares these ideas.
+The prior-art review and limits below qualify the novelty pitch.
 
 ### Critic review of the first draft and resolutions
 
@@ -25,7 +31,7 @@ A fresh-context reviewer attacked the first draft (27 findings: 5 critical, 19 m
 | 5 | Two SRAM macros are the real physical risk | Accepted: one macro (IMEM 1024x16); data memory is a 32-word latch array plus `ldi` reads from IMEM for constant tables. GitHub CI and precheck before any significant RTL is a stop-and-ask item (pushing needs the user). |
 | 6 | Combinational pin resolution contradicts registered outputs | Accepted: resolved pad outputs are registered (one cycle, in the spec). |
 | 7 | Name the timing paths | Accepted: tracked in `notes/area.md` with each harden. |
-| 8 | 16-bit time horizon | Partly accepted: per-lane prescaler (PRE) for long slots, `waitt` sets a thread LATE flag, far deadlines read as past and trip LATE. Rebutted 24-bit `NOW`: registers are 16 bits, so wider time would need multi-word arithmetic in every protocol; long timeouts loop in firmware. |
+| 8 | 16-bit time horizon | Partly accepted: per-lane prescaler (PRE) for long slots; `waitt` sets thread LATE for deadlines interpreted as past. Firmware must keep deadlines within 32767 cycles: farther targets are ambiguous, and timestamps a whole epoch away can alias an on-time deadline without LATE. Rebutted 24-bit `NOW`: registers are 16 bits, so wider time would need multi-word arithmetic; long timeouts loop in firmware. |
 | 9 | Config writes race queued commands | Accepted: `lw`, `start` and `sync` go through the command queue, in order. |
 | 10 | Firmware sketches did not assemble | Accepted: `andi` is now `simm9` (masks bytes), `xori` added, PC is 10 bits for 1024 words, sketches marked illustrative with the tested firmware in `fw/`. |
 | 11 | UART RX misses back-to-back frames | Accepted: a receive command ends one cycle after its last sample. |
@@ -42,7 +48,7 @@ A fresh-context reviewer attacked the first draft (27 findings: 5 critical, 19 m
 | 22 | `docs/decisions.md` missing | Resolved (this file). |
 | 23 | Fixed-slot codes only | Accepted: per-symbol slot length covers pulse-distance codes; capture mode covers receive of codes the pipeline cannot decode. |
 | 24 | Lockstep cost and convergence | Accepted: semantics frozen here first; lockstep compares commit records and pad traces; Verilator for long runs. |
-| 25 | What SBY can prove | Accepted as the formal plan (`docs/verification.md`), with width-parameterised lanes. |
+| 25 | What SBY can prove | Early plan proposed width-parameterised lanes; that abstraction was abandoned. Current lane counters have fixed widths, and `FULL` selects features only. The limited full-width miter remains unfinished (`docs/verification.md`). |
 | 26 | Schedule over budget | Accepted: cuts below, gates below. |
 | 27 | Pick a cut-down Tempo, not A or B | Accepted. |
 
@@ -173,3 +179,37 @@ Its firmware also has no prescaler configuration. Extending that tool to
 slow rates requires a wider software timebase and explicit prescaler
 handling; a rate accepted by the UART console is not automatically valid
 for this trigger tool. The restriction scales with the actual chip clock.
+
+## SRAM timing views, 2026-09-26
+
+Use `nom_typ_*`, `nom_fast_*` and `nom_slow_*` to select the macro's matching
+Liberty files. IHP standard-cell corners all start with `nom_`; the previous
+`nom_*`/`min_*`/`max_*` mapping selected the typical SRAM view at every corner.
+Three regressions use the actual IHP corner names and check the selected
+filenames. The supplied fast macro is characterized at -55 C, while the
+standard-cell fast corner is -40 C; preserve that explicit difference.
+Prior fast/slow macro timing is superseded and needs a fresh physical run.
+The `goal_slow_corner` probe additionally tests slow-default mapping and
+timing repair at the unchanged 20 ns period before considering a full route.
+
+## Complete source submission, 2026-09-26
+
+The export now preserves tracked RTL, firmware, host code, assembler, cycle
+model, independent protocol models, tests, formal jobs, flow integration,
+design documentation and evidence notes. It copies the real README and CI
+workflows without rewriting them. Excluding firmware and verification made
+the former export impossible to reproduce and contradicted the open-source
+submission requirement.
+
+Exporting prepares staged files in a clean linked worktree; it does not
+commit or publish. The source checkout, an unrelated repository and a dirty
+destination are rejected before removal. Disposable-repository regressions
+exercise the exporter, image regeneration, assembler/ISA tests and host
+imports without modifying a real public branch. Preparing the actual public
+submission still follows clean signoff and review.
+
+## Declared clock 25 MHz, 2026-09-30
+
+`CLOCK_PERIOD` 40 ns, `info.yaml` `clock_hz` 25000000. The last routed signoff harden (`5a0aa4c`, 50 MHz) missed slow-corner setup by 9.19 ns reg-to-reg (1,244 violating paths; typ +1.68 ns), a minimum slow-corner period of about 29.2 ns. That run also timed the SRAM at the typ view in every corner (`nom_*` matched all three IHP corners); the per-corner views now select slow/fast SRAM timing, so the slow corner is somewhat worse than 29.2 ns measured. 40 ns leaves about 10 ns over the old measurement for that and for a routing change, and there is budget for one harden with no retry. 25 MHz is what the RP2350 demo board makes exactly (150 MHz / 6). No RTL restructure for 50 MHz fits this session; 50 MHz stays a future target, not a claim.
+
+Firmware images are cycle-parametrised: the host library computes every baud, SCK and I2C slot from `Link.clock_hz`, which now defaults to the transport's clock or to 25 MHz (`host/tempo_host/link.py` `CHIP_CLOCK_HZ`). The RTL and gate-level cocotb suites are cycle-accurate and still simulate a 20 ns clock period; their protocol models are parameterised by the same cycle counts, so they verify identical cycle-level behaviour at any clock. Absolute protocol rates in `docs/benchmarks.md` are at 25 MHz. Fixed-constant firmware written for 50 MHz (`fw/usb_ls_phy.s` BITLEN 33, `fw/manchester.s`, `fw/demo_multibus.s`) runs at half its stated rate at 25 MHz; USB low speed at 25 MHz needs 16.67 cycles/bit and is not claimed at this clock.

@@ -17,9 +17,10 @@ Constrained-random programs and formal proofs cover the core's isolation and
 mailbox bounds. See [verification](docs/verification.md) and the
 [bug log](notes/bugs.md) for evidence and remaining work.
 
-The latest completed routed design fails slow-corner timing at the 50 MHz
-target. This is a design in progress; current area and timing results are in
-[notes/area.md](notes/area.md).
+The declared clock is 25 MHz (40 ns; the RP2350 demo board makes it as
+150 MHz / 6). The previous routed design at 50 MHz missed slow-corner setup
+by 9.19 ns, so 50 MHz is a future target, not a claim. Signoff for the
+25 MHz build, with every count, is in [notes/area.md](notes/area.md).
 
 ## Run the checks
 
@@ -41,7 +42,8 @@ The assembler and cycle model live in `tools/tempo/`, protocol firmware in
 ## Use the chip
 
 The [datasheet](docs/info.md) has the pin map, host protocol and a demo-board
-UART example. The [architecture](docs/architecture.md) specifies the ISA and
+UART example. [Use cases](docs/use-cases.md) cover wiring, commands, rates
+and current limits. The [architecture](docs/architecture.md) specifies the ISA and
 lane registers. [Decisions](docs/decisions.md) record the design tradeoffs.
 
 The host SPI port loads programs entirely through Tiny Tapeout's standard

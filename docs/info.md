@@ -8,7 +8,7 @@ Tempo is a small processor built for bit-banging protocols. Firmware decides wha
 - **Three lanes** each select data out, data in, clock and aux pins. A lane shifts words on its own timeline with a fractional bit period. Lanes 0 and 1 also do NRZI, bit stuffing, CRC and receive resynchronisation; lane 2 does plain NRZ. Lane 3 instructions halt the issuing thread as illegal.
 - Each data bit is drawn as a programmable **symbol** (two levels and a split point inside the bit), so NRZ, Manchester, pulse-width codes such as WS2812 and 1-Wire, and pulse-distance codes are register settings.
 - Lanes drive clock pins (SPI modes 0-3, I2C, JTAG, SWD), run open drain with clock stretching, can hard-start a receive on a pin pattern (UART start bit, USB SOP), and can timestamp every input edge.
-- Missed deadlines, transmit underruns and receive overruns set sticky flags, so timing failures are visible instead of silent.
+- Late deadlines within the 32767-cycle scheduling horizon, empty transmit queues with FRAME enabled, and receive FIFO overruns set sticky flags. Timestamp aliases outside that horizon and other protocol failures are not necessarily detected.
 
 `uio[7:0]` are bidirectional protocol pins (indices 0–7), and `ui[4:0]`
 are general inputs (indices 8–12). Output indices 8–10 map to `uo[0:2]`,
@@ -16,9 +16,10 @@ index 11 maps to `uo[7]`, and indices 12–14 map to `uo[4:6]`.
 `ui[7:5]` and `uo[3]` carry the host port. Pin selector 15 disables a lane
 pin; it cannot select the host port.
 
-The target core clock is 50 MHz (20 ns). The last completed routed design
-misses slow-corner setup timing; a safe production clock is not signed off
-yet. `Link.clock_hz` must match the clock the board actually supplies.
+The declared core clock is 25 MHz (40 ns), which the RP2350 makes exactly
+as 150 MHz / 6. 50 MHz is a future target: the last 50 MHz routed design
+missed slow-corner setup by 9.19 ns. `Link.clock_hz` must match the clock the
+board actually supplies; it defaults to 25 MHz.
 
 ## How to test
 

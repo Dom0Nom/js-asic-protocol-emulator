@@ -11,8 +11,8 @@ Numbers measured in this repo unless marked otherwise.
 - SRAM macros (IHP, 1 port, synchronous read, 6.25 ns clock-to-data at the slow corner): 512x16 is 236.8 x 191.3 um (45k um²), 1024x16 is 236.8 x 336.5 um (80k um²). One SRAM bit costs about 10 um² against about 67 um² for a writable flop, so memory belongs in SRAM.
 - The TT IHP power grid cannot reach SRAM supply pins without an extra flow step (see `docs/decisions.md`). Every macro adds physical risk, so the design uses exactly one.
 - A single-port SRAM gives one access per cycle, so several state machines cannot each fetch an instruction every cycle from one shared macro.
-- IO: 8 inputs, 8 outputs, 8 bidirectional pins, all through the TT mux, no synchronisers in the harness. No official IHP pad speed exists: sky130 is rated 33 MHz out and 66 MHz in, and the only IHP silicon data point is a clean 15 MHz ring-oscillator output. USB low speed (1.5 Mbit/s) is safe. 10BASE-T needs 50 ns pulses and is unproven.
-- Clock: 50 MHz target. The demo board RP2040 generates the project clock and can produce other frequencies (40, 48, 60 MHz).
+- IO: 8 inputs, 8 outputs, 8 bidirectional pins, all through the TT mux, no synchronisers in the harness. The IO evidence collected in `docs/research.md` does not establish a supported CMOS5L pad rate. USB low-speed digital PHY behavior is tested in simulation; electrical compliance and enumeration remain unverified. 10BASE-T needs 50 ns pulses and is unproven.
+- Clock: 25 MHz declared (40 ns); 50 MHz is a future target (the 50 MHz routed design missed slow-corner setup by 9.19 ns). The demo-board RP2350 supplies the project clock; `Link.clock_hz` must match its actual configured frequency.
 - Programs, data and control reach the chip only through those pins, so every candidate needs a host port.
 - Schedule: one developer with AI assistance, 2026-09-25 to 2027-01-18, holidays included.
 
@@ -36,23 +36,23 @@ One 16-bit RISC core at 50 MHz with single-cycle ALU ops, direct pin registers (
 
 ## Candidate C: Tempo
 
-Tempo separates what the firmware decides from when the pins move, and makes that separation a provable property.
+Tempo separates what the firmware decides from when the pins move. Its intended timing guarantee is under verification.
 
-1. **Four hardware threads on one barrel pipeline.** One 16-bit datapath executes four threads in strict rotation, one instruction per thread every 4 cycles (12.5 MIPS each at 50 MHz). A barrel has no data hazards, no forwarding and no interlocks, and needs exactly one instruction fetch per cycle. That is what lets one single-port 1024x16 SRAM serve all threads.
+1. **Four hardware threads on one barrel pipeline.** One 16-bit datapath executes four threads in strict rotation, one instruction per thread every 4 cycles (6.25 MIPS each at the declared 25 MHz). A barrel has no data hazards, no forwarding and no interlocks, and needs exactly one instruction fetch per cycle. That is what lets one single-port 1024x16 SRAM serve all threads.
 2. **Lanes: timed line-code engines.** A lane owns up to four pins (data out D, data in I, clock C, aux A) and turns queued commands into pin edges on its own timeline. Transmit runs `bits -> CRC -> bit stuffing -> NRZI -> symbol -> pins`, receive runs the reverse. The **symbol table** is where the line code lives: each data bit selects symbol 0 or 1, and each symbol has its own slot length, a split point, two levels, and a flag that makes the levels relative to the current line level. NRZ (UART, SPI, I2C), Manchester and differential Manchester (10BASE-T, DALI), pulse-width codes (WS2812, 1-Wire write slots) and pulse-distance codes (NEC IR) are all register settings of the same datapath. PIO and PRU express these as instruction tricks (computed jumps into side-set tables, hand-tuned delays).
-3. **Exact, fractional, stall-proof time.** Each lane's slots come from a phase accumulator (integer length plus an 8-bit fraction per slot) with a power-of-two prescaler, so 1.5 Mbit/s at 50 MHz (33.33 cycles) has at most one cycle of jitter and no drift, and slow codes (IR, 300 baud) fit the same registers.
+3. **Fractional slot timing.** Each lane uses an integer length plus an 8-bit fraction per slot and a power-of-two prescaler. Accumulator rounding stays within one time unit of the programmed period (one core cycle at PRE=0, `2^PRE` cycles otherwise). The programmed rate is quantized: 33 + 85/256 cycles approximates 1.5 Mbit/s at 50 MHz but advances one cycle per 768 slots relative to the ideal 33⅓-cycle period, about 39 ppm. Prescaling also lets slow codes such as IR and 300 baud fit the same registers. Clock stretching deliberately pauses the lane timeline.
 4. **Timestamped inputs.** A lane's pattern matchers watch its pins (current and previous filtered sample, masked) and record the cycle of a match. A receive can hard-start on the match, so UART start bits, I2C START/STOP, USB SOP/SE0 and CAN SOF are register settings. An edge-capture mode streams timestamps of every edge into the lane's receive FIFO, which is a protocol sniffer and logic analyser for signals no line code covers.
 5. **Clocked and open-drain pins are first class.** A lane drives a clock pulse inside the slot (SPI modes 0-3, JTAG, SWD, I2C), can run D and C open-drain, freezes its timeline while a stretched clock is held low, and in arbitration mode stops driving at the first lost bit (I2C multi-master, CAN).
-6. **Nothing fails silently.** Missed start times, transmit underruns mid-frame, receive FIFO overruns, late `waitt`, stuffing errors and lost arbitration all set sticky flags.
+6. **Detectable errors have sticky flags.** Late starts and `waitt` deadlines within the supported timestamp horizon, empty transmit queues with FRAME enabled, receive FIFO overruns, stuffing errors and lost arbitration are reported. These flags do not diagnose every timing or protocol failure.
 
-**Timing-independence theorem.** For two runs in which every lane receives the same command stream and no timing flag fires, the pin traces are identical, whatever the thread interleaving, stalls, host traffic or instruction timing. Designs whose timing comes from counting instructions (PIO, PRU, and deadline-register cores) cannot state this. A reduced-width two-copy miter in SymbiYosys checks this property, but the proof is still incomplete. Dynamic model/RTL tests also exercise varying command timing. See `docs/verification.md`.
+**Timing-independence claim under verification.** Within a frame anchored to the same start time, with FRAME remaining enabled through its final EOF, the same initial lane state, input trace and ordered command tape, command-delivery variation should not change lane output timing while neither execution reports LATE/UNDER. The current two-copy miter checks a limited six-entry tape on a full-width lane; its proof and completion witnesses remain unfinished. It compares internal drive states and ownership, not the whole chip's pad resolver. Unanchored commands intentionally start when delivered: five extra CPU NOPs before the same `emit` shift an output edge from cycle 27 to 47 with no error flags (`runs/goal_unanchored_counterexample.json`). Identical command order alone is insufficient. Dynamic model/RTL checks exercise scheduled starts and workload variation. See `docs/verification.md` for the exact scope and evidence.
 
 Closest prior art, and what is borrowed: barrel threads and timed, timestamped ports are XMOS XS1. NRZI and stuffing in pin hardware exist in Propeller 2 smart pins (USB mode). Fractional timing with 8 fractional bits matches the RP2040 PIO clock divider. Tempo's contributions are the symbol table as a general line-code primitive, stretch-aware and arbitration-aware clocked lanes, capture-to-FIFO, and the timing-independence property under verification, all in 0.9 mm².
 
 Direct bit-banging stays first class. A thread can move any lane pin with cycle-exact timing using `start` (schedule) plus `emit` (raw levels), without any line coding. Protocols with no use for the coding pipeline, such as PS/2 or custom sensor buses, are written this way.
 
-- Program loading: host SPI port on 4 pins (`ui[7:5]`, `uo[7]`) writes the instruction SRAM, sets thread PCs, starts, stops and single-steps threads, reads registers of halted threads, and exchanges words with firmware through mailbox FIFOs while threads run.
-- Size (re-estimated after the review): barrel core with 32 x 16-bit registers and an 8-word scratch memory about 4k cells, full lanes about 1.8k cells each, lite lanes (no NRZI, stuffing, CRC, resync) about 1.3k each, host port 0.8k, registered pin resolution 0.8k: about 12.5k cells, roughly 250k um², plus the 80k um² SRAM. About 60% of the usable area.
+- Program loading: host SPI port on 4 pins (`ui[7:5]`, `uo[3]`) writes the instruction SRAM, sets thread PCs, starts, stops and single-steps threads, reads registers of halted threads, and exchanges words with firmware through mailbox FIFOs while threads run.
+- Size: the early 12.5k-cell estimate understated the implemented design. The current implementation has two full lanes and one lite lane; synthesis and physical results, including timing and electrical failures, are recorded in `notes/area.md`. Use those measured results when evaluating fit and headroom.
 
 ## Firmware sketches
 
@@ -69,7 +69,7 @@ loop:   hget r4                 ; byte from the host mailbox
         bra  loop
 ```
 
-UART RX: start pattern "I was 1, I is 0", AUTOSTART, sample in the middle of the slot. A receive command ends at its last sample, so the lane is idle again in the middle of the stop bit and never misses a start bit from a slightly fast sender.
+UART RX: start pattern "I was 1, I is 0", AUTOSTART, sample in the middle of the slot. A receive command ends one cycle after its last sample, allowing the lane to be rearmed during the stop bit. Back-to-back reception still depends on firmware rearming in time, sufficient host draining and supported sender timing; the RTL suite checks a 2% fast sender.
 
 ```
 rx:     rxn  l1, 10             ; arm a 10-bit receive
@@ -121,7 +121,7 @@ data:   ld   r4, [r6 + 0]
 
 ## Scoring
 
-Each criterion 1 (poor) to 5 (strong). Weights reflect what the judges value and what one developer can finish. The first draft of this table had no schedule criterion and scored full Tempo too kindly; the critic's rescoring is adopted.
+Each criterion 1 (poor) to 5 (strong). These are historical architecture-selection estimates with our own weights, not Jane Street scores or measured readiness. The first draft had no schedule criterion and scored full Tempo too kindly; the critic's rescoring is retained for the decision history. Current evidence and requirements are in `docs/readiness.md`.
 
 | Criterion (weight) | A: PIO-plus | B: RISC + timed IO | Tempo, full draft | Tempo (chosen) |
 |---|---|---|---|---|
@@ -135,7 +135,7 @@ Each criterion 1 (poor) to 5 (strong). Weights reflect what the judges value and
 | Schedule risk (3) | 4 | 5 | 2 | 3 |
 | **Weighted total (max 80)** | **51** | **56** | **52** | **59** |
 
-"Tempo (chosen)" is the cut-down design specified below: one SRAM macro, two full and two lite lanes, no external-clock lane mode, queued configuration, and the timing-independence property as the headline verification result.
+"Tempo (chosen)" describes the initial cut-down proposal: one SRAM macro, two full and two lite lanes, no external-clock receive, queued configuration and an intended timing-independence property. The implemented specification below has two full lanes and one lite lane, external-clock receive, and an unfinished timing proof. The changes and reasons are in `docs/decisions.md`.
 
 ## Tempo specification
 
@@ -152,7 +152,7 @@ This section is normative. `tools/tempo/isa.py` holds the encoding tables and `t
 | `EV` | 8 | Event flags for thread-to-thread signalling. |
 | `H2T`, `T2H` | 4 x 16 each | Mailbox FIFOs, host to threads and threads to host. |
 
-Time comparison: `after(a, b)` is true when `(a - b) mod 2^16 < 2^15`. Deadlines further than 32767 cycles away read as already passed; the flags below make that visible instead of silent.
+Time comparison: `after(a, b)` is true when `(a - b) mod 2^16 < 2^15`. Firmware must schedule deadlines no more than 32767 cycles ahead. Outside this half-range horizon, comparison is ambiguous: a deadline NOW+65536+k has the same timestamp as NOW+k and may be accepted without LATE. Long waits require bounded steps or a wider firmware timebase.
 
 ### Pins
 
@@ -274,14 +274,14 @@ Registers (`lr` reads the current value; `lw` goes through the command queue):
 - otherwise at the next start-pattern match if `AUTOSTART` is set and the command is a receive without `c`;
 - otherwise at once.
 
-Consecutive commands run back to back. With `FRAME` set, a command that ends while no data command is queued sets `UNDER`, unless it is an `emit` with bit 7 set, which marks the end of a frame. So inside a frame every gap in the command stream is either anchored by `start`/`sync` or flagged, which is what the timing-independence theorem needs.
+Consecutive commands run back to back. With `FRAME` set, a command that ends while no data command is queued sets `UNDER`, unless it is an `emit` with bit 7 set, which marks the end of a frame. The timing-independence claim requires FRAME to remain enabled through this final EOF; an anchored first command alone does not diagnose later empty-queue gaps with FRAME disabled. The precise checked tape and incomplete proof are described in `docs/verification.md`.
 
 **Slots.** A slot carrying data bit `b` lasts `LEN_b` time units, receive and `emit` slots last `LEN0`, plus one extra unit whenever the fractional accumulator (`acc += FRAC`, 8 bits) overflows. With `t` the offset in time units from slot start:
 
 - D: for a coded bit, level A of `SYM_b` while `t < split`, level B after. With REL, the levels are XORed with the NRZI line state (differential codes). `emit` drives raw levels for its slot. In receive slots D holds (or is released with `DREL`).
 - A: complement of D with `DIFF`; otherwise holds the last `emit` level.
 - C (if `CEN`): `CPOL xor (CR <= t < CF)`. When the lane goes idle after a coded (`tx`/receive) slot, C returns to `CPOL`; after an `emit` it keeps the emitted level (an I2C STOP leaves SCL released). With `STRETCH` and `COD`, when C is released (at `CR`, or at the start of an `emit` slot that releases it) the lane freezes `t` until the filtered C input reads 1.
-- At `t = SAMP` the lane samples I (receive commands and `tx x`). A receive command ends one cycle after its last sample, so a new start edge (a UART start bit from a slightly fast sender) is never missed; but if a continuing receive (`c`, possibly behind one `lw`/`start`) is already queued, or the lane drives a clock (`CEN`), it runs to the end of its slot instead, so the continuation stays on the bit grid and the clock pulse is never cut short.
+- At `t = SAMP` the lane samples I (receive commands and `tx x`). A receive command ends one cycle after its last sample, giving firmware time to rearm before a following UART start edge when sender timing permits. For normal receive completion, if a continuing receive (`c`, possibly behind one `lw`/`start`) is already queued, or the lane drives a clock (`CEN`), it runs to the end of its slot instead, keeping the continuation on the bit grid and completing the clock pulse. A stop-pattern match can terminate reception earlier, and RESYNC can hand over on an edge.
 - `RESYNC` (full lanes): during a receive, an I edge of the chosen polarity sets `t` to the synchroniser plus filter latency, so the slot re-aligns to the actual edge. The fractional accumulator is not reset. There is no resynchronisation jump width limit, so CAN receive is best effort.
 - `ARB`: in a `tx x` slot where D was released and the sample reads 0 (outside the last bit), set `ARBLOST` and release D for the rest of the command.
 - `XCLK` (all lanes): a receive command has no timeline. It samples I on each chosen edge of the filtered C input (C is an input; `CEN` should be off) and ends after its last sample, or early on a stop-pattern match (END set). A queued continuation starts at once. This is the receive half of an SPI or I2C target and the basis of the bus monitors; the filter and synchroniser delay C and I equally. A sampling edge that arrives while no receive is running or queued sets `UNDER`: the firmware fell behind and bits were lost.
@@ -333,5 +333,5 @@ Host IMEM accesses use cycles whose fetch slot belongs to a halted thread, so co
 ## Verification hooks built into the architecture
 
 - The model predicts every pad on every cycle, so RTL tests compare full pin traces and architectural commits.
-- Counter and slot-length widths are parameters, so formal proofs run on narrowed lanes (8-bit counters, 4-bit lengths), with the data-independence argument written down in `docs/verification.md`.
-- Every timing failure has a flag, so "no flag" is a meaningful precondition for the timing-independence theorem.
+- The current lane RTL parameter is `FULL`; counter and slot-length widths are fixed. Formal jobs use the implemented widths with constrained short tapes, not a narrowed-width abstraction.
+- LATE and UNDER make missed anchors and empty queues inside FRAME visible. They do not imply that unanchored commands are independent of delivery time; the guarantee and remaining proof work are scoped in `docs/verification.md`.
