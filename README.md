@@ -22,6 +22,20 @@ The declared clock is 25 MHz (40 ns; the RP2350 demo board makes it as
 by 9.19 ns, so 50 MHz is a future target, not a claim. Signoff for the
 25 MHz build, with every count, is in [notes/area.md](notes/area.md).
 
+## What it does differently
+
+Compared with RP2040 PIO and TI PRU, Tempo trades speed for one larger shared
+program store and line coding in hardware; at 25 MHz it is slower than both.
+One 130-word image, `fw/demo_multibus.s`, runs UART, Manchester, a host-driven
+I2C controller with clock stretching and a compute thread at once, and the RTL
+test checks their wire-time overlap
+(`test_demo_resident_multibus_with_busy_host_and_memory` in
+[test/test_usecases.py](test/test_usecases.py)). Manchester is lane settings,
+not added RTL. Bench images: logic analyser, SPI and I2C monitors, JTAG chain
+scan and pin finder, SWD attach, 24C02 I2C EEPROM target, triggered pulse.
+Sizes and the comparison: [architecture](docs/architecture.md#measured-comparison-with-pio-and-pru);
+wiring and commands: [use cases](docs/use-cases.md).
+
 ## Run the checks
 
 With Icarus Verilog installed and the project Python environment active:
