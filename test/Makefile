@@ -35,7 +35,7 @@ endif
 
 # SDF=<file> back-annotates gate-level timing (with GATES=yes)
 ifneq ($(SDF),)
-COMPILE_ARGS    += -gspecify -DSDF_FILE=\"$(SDF)\"
+COMPILE_ARGS    += -gspecify -ginterconnect -DSDF_FILE=\"$(SDF)\"
 endif
 
 # NODUMP=yes skips the FST dump (gate-level runs are much faster without it)

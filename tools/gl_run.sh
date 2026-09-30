@@ -17,6 +17,19 @@ rsync -a --exclude sim_build --exclude results.xml --exclude '*.fst' "$ROOT/test
 for x in src tools host fw; do ln -sfn "$ROOT/$x" "$D/$x"; done
 cp "$NL" "$D/test/gate_level_netlist.v"
 shasum -a 256 "$NL"
+if [ -n "${SDF:-}" ]; then
+  # Icarus cannot parse the SRAM macro's bus-indexed IOPATHs and aborts the
+  # rest of the file; its behavioral model has no specify block, so drop it.
+  python3 - "$SDF" "$D/test/annotate.sdf" <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+cells = re.split(r"(?=\n \(CELL\n)", text)
+keep = [c for c in cells if 'CELLTYPE "RM_IHPSG13' not in c]
+open(sys.argv[2], "w").write("".join(keep) + ("" if keep[-1].rstrip().endswith(")") else ")\n"))
+print("sdf cells", len(cells) - 1, "kept", len(keep) - 1)
+PY
+  export SDF=$D/test/annotate.sdf
+fi
 source "$ROOT/.venv/bin/activate"
 cd "$D/test"; B=-B; rc=0
 for t in $TESTS; do
