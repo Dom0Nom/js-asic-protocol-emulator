@@ -47,7 +47,7 @@ Tempo separates what the firmware decides from when the pins move. Its intended 
 
 **Timing-independence claim under verification.** Within a frame anchored to the same start time, with FRAME remaining enabled through its final EOF, the same initial lane state, input trace and ordered command tape, command-delivery variation should not change lane output timing while neither execution reports LATE/UNDER. The current two-copy miter checks a limited six-entry tape on a full-width lane; its proof and completion witnesses remain unfinished. It compares internal drive states and ownership, not the whole chip's pad resolver. Unanchored commands intentionally start when delivered: five extra CPU NOPs before the same `emit` shift an output edge from cycle 27 to 47 with no error flags (`runs/goal_unanchored_counterexample.json`). Identical command order alone is insufficient. Dynamic model/RTL checks exercise scheduled starts and workload variation. See `docs/verification.md` for the exact scope and evidence.
 
-Closest prior art, and what is borrowed: barrel threads and timed, timestamped ports are XMOS XS1. NRZI and stuffing in pin hardware exist in Propeller 2 smart pins (USB mode). Fractional timing with 8 fractional bits matches the RP2040 PIO clock divider. Tempo's contributions are the symbol table as a general line-code primitive, stretch-aware and arbitration-aware clocked lanes, capture-to-FIFO, and the timing-independence property under verification, all in 0.9 mm².
+Closest prior art, and what is borrowed: barrel threads and timed, timestamped ports are XMOS XS1. NRZI and stuffing in pin hardware exist in Propeller 2 smart pins (USB mode). Fractional timing with 8 fractional bits matches the RP2040 PIO clock divider. Tempo's contributions are the symbol table as a general line-code primitive, stretch-aware and arbitration-aware clocked lanes, capture-to-FIFO, and the timing-independence property under verification (bounded so far), all within the 6x4 Tiny Tapeout allocation.
 
 ### Measured comparison with PIO and PRU
 
@@ -56,14 +56,20 @@ Tempo sizes are SRAM words the assembler emits for `fw/` (16-bit, parameter bloc
 | | Tempo | RP2040 PIO [1] | AM335x PRU-ICSS [2] |
 |---|---|---|---|
 | Engines | 4 barrel threads on one datapath, 6.25 MIPS each at 25 MHz; 3 lanes | 2 blocks x 4 state machines | 2 PRUs, 32-bit RISC, up to 200 MHz |
-| Program store | one 1024 x 16 SRAM for all threads | 32 slots per block, shared by its 4 machines (1-write 4-read register file) | 8 KB instruction RAM per PRU |
-| UART TX + RX | 180 words, 3 threads, 2 lanes (console bridge with 512-word ring) | `uart_tx` 4 + `uart_rx` 9 | not measured |
-| SPI controller | 151 words, 1 thread, 1 lane | `spi_cpha0` 2, `spi_cpha0_cs` 9 | not measured |
-| I2C controller, stretching | 124 words (host image), 64 (demo module); 1 thread, 1 lane; START/STOP in firmware | `i2c` 18 + 4-entry `set_scl_sda` table; the CPU sends START/STOP/RSTART as instruction words and handles unexpected NAK via IRQ | not measured |
-| I2C target, 24C02 | 163 words, 1 thread, 3 lanes | no example | not measured |
-| USB-LS packet PHY | 118 words, 2 threads, 2 lanes (NRZI, stuffing, CRC16 in the lane) | not counted | not measured |
-| Manchester TX | 37 words, 1 thread, 1 lane | `manchester_tx` 6 | not measured |
-| UART + Manchester + I2C + compute resident together | `demo_multibus` 130 words (13% of SRAM), 4 threads, 3 lanes | 28 of one block's 32 slots for the three wire programs; START/STOP and compute on the CPU | not measured |
+| Program store | one 1024 x 16 SRAM for all threads | 32 slots per block, shared by its 4 machines | 8 KB instruction RAM per PRU |
+| Line coding in hardware | symbol table, NRZI, bit stuffing, CRC per lane | shift/side-set; coding in the program or CPU | none; in PRU software |
+
+Firmware size per protocol, Tempo against the PIO programs in `pico-examples`. PRU is left out of this table: TI publishes no size-comparable PRU programs for these protocols, and a PRU core is a general-purpose CPU rather than a pin engine.
+
+| Protocol | Tempo | RP2040 PIO |
+|---|---|---|
+| UART TX + RX | 180 words, 3 threads, 2 lanes (console bridge with 512-word ring) | `uart_tx` 4 + `uart_rx` 9 |
+| SPI controller | 151 words, 1 thread, 1 lane | `spi_cpha0` 2, `spi_cpha0_cs` 9 |
+| I2C controller, stretching | 124 words (host image), 64 (demo module); 1 thread, 1 lane; START/STOP in firmware | `i2c` 18 + 4-entry `set_scl_sda` table; the CPU sends START/STOP/RSTART as instruction words and handles unexpected NAK via IRQ |
+| I2C target, 24C02 | 163 words, 1 thread, 3 lanes | no example |
+| USB-LS packet PHY | 118 words, 2 threads, 2 lanes (NRZI, stuffing, CRC16 in the lane) | no example |
+| Manchester TX | 37 words, 1 thread, 1 lane | `manchester_tx` 6 |
+| UART + Manchester + I2C + compute resident together | `demo_multibus` 130 words (13% of SRAM), 4 threads, 3 lanes | 28 of one block's 32 slots for the three wire programs; START/STOP and compute on the CPU |
 
 Per protocol, PIO programs are smaller: Tempo firmware also carries the host command protocol, framing and error handling that PIO examples leave to the Cortex-M0+. The measured difference is what one on-chip store holds without a CPU: all of `demo_multibus`, with 894 words left. Tempo is not faster; PRU runs 8 times the declared clock per core.
 
