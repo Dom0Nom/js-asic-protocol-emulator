@@ -144,28 +144,6 @@ call costs advance the live chip at its actual clock while preserving
 wire data. `tools/bench_rates.py` checks sustained SPI/UART transfers across
 host-cost scenarios; those are sensitivity predictions, not board timings.
 
-## What each layer caught
-
-Per-layer index of bugs 1-46; all 54 are grouped by method in
-[Bugs the method caught](#bugs-the-method-caught).
-
-| Layer | Bugs |
-|---|---|
-| Writing the RTL against the model (review) | 1, 2, 3, 4 |
-| Lint | 5 |
-| Model-level protocol tests | 6, 11 |
-| RTL-vs-model lockstep | 7 |
-| Chip-level protocol tests | 8, 12, 14, 15 |
-| Per-block synthesis | 9, 10 |
-| Writing firmware against the spec | 13 |
-| Host compatibility and independent SPI timing sweep | 30, 31, 32, 33 |
-| Submission pin map against RTL and board transport | 34 |
-| Independent physical metrics and obstruction audit | 29, 35 |
-| Experiment runner failure-path check | 36 |
-| Host/firmware negative protocol and image-switch tests | 37, 38, 39, 40, 41, 42, 43 |
-| Actual corner selection and resolved LibreLane view filtering | 44 |
-| Disposable complete-source export and destination regressions | 45, 46 |
-
 ## Bugs the method caught
 
 The project bug log holds 54 real defects in the model, RTL, firmware, host
