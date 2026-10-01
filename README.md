@@ -38,7 +38,12 @@ test checks their wire-time overlap
 [test/test_usecases.py](test/test_usecases.py)). Manchester is lane settings,
 not added RTL. Bench images: logic analyser, SPI and I2C monitors, JTAG chain
 scan and pin finder, SWD attach, 24C02 I2C EEPROM target, triggered pulse.
-Sizes and the comparison: [architecture](docs/architecture.md#measured-comparison-with-pio-and-pru);
+Measured against PRU-style software timing on the same core, a lane UART costs
+5 thread instructions per byte instead of 49-68, keeps edges within one cycle
+instead of up to 3 (12% of a bit at 1 Mbaud), and lets one thread drive two
+UARTs at unrelated rates with zero edge error where the software loop is off
+by 31-56 cycles (`tools/bench_swlane.py`, cycle model, two-UART case confirmed
+on RTL). Sizes and the comparison: [architecture](docs/architecture.md#measured-comparison-with-pio-and-pru);
 wiring and commands: [use cases](docs/use-cases.md).
 
 ## Run the checks

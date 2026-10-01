@@ -73,6 +73,25 @@ Firmware size per protocol, Tempo against the PIO programs in `pico-examples`. P
 
 Per protocol, PIO programs are smaller: Tempo firmware also carries the host command protocol, framing and error handling that PIO examples leave to the Cortex-M0+. The measured difference is what one on-chip store holds without a CPU: all of `demo_multibus`, with 894 words left. Tempo is not faster; PRU runs 8 times the declared clock per core.
 
+#### Lane versus software timing on the same core
+
+A PRU core is a CPU that times pins in software. To measure what the lane adds over that model without a PRU, `tools/bench_swlane.py` runs the same UART TX (8N1, 16-byte stream, 25 MHz, thread 0) two ways on Tempo's cycle model: a PRU-style software loop (`fw/bench_swuart.s`: GOUT writes timed by `waitt` deadlines) and a minimal lane loop (`hget`, shift/or, `tx`, branch). The two-UART cases were also run on the RTL in lockstep with the model, with threads 1-3 busy, and reproduce the model's edge errors exactly. `tools/tests/test_bench_swlane.py` asserts the numbers.
+
+| Metric | Software bit-bang (PRU-style) | Lane TX |
+|---|---|---|
+| Thread instructions per byte | 49 (integer period), 68 (fractional period at 115200) | 5 |
+| Thread issue slots free during TX | 0% (spins in `waitt`) | 98.5% at 115200, 87.2% at 1 Mbaud (polling variant) |
+| Worst edge error, 115200 | 3.11 cycles (124 ns, 1.43% of a bit) | 0.86 cycles (34 ns, 0.40%) |
+| Worst edge error, 1 Mbaud | 3 cycles (120 ns, 12% of a bit) | 0 |
+| Max rate, core/lane limit (no pad model) | 1.25 Mbaud (20 cycles per bit) | 12.5 Mbaud (2 cycles per bit; the 5-instruction feed is the limit) |
+| Other three threads busy | edge times bit-identical | edge times bit-identical |
+| Two UARTs on one thread, 115200 + 100k | decodes, LATE set, edges off by 31 and 56 cycles | 0 and 0 cycles, 61% of slots free |
+| Two UARTs on one thread, 625k + 521k | fails to decode | 0 and 0 cycles, 53% free |
+
+Software edges can only move on the thread's issue slot (every 4 cycles), so they land up to 3 cycles off the ideal grid unless the bit period is a multiple of 4 cycles. The barrel already isolates threads from each other (edges are identical with the other threads busy, in both methods); the lane adds isolation from the thread's own instruction stream, which is what lets one thread run two unrelated rates with zero edge error. For comparison, the pico-examples `uart_tx.pio` runs 2 state-machine instructions per data bit at 8 state-machine clocks per bit, 18 per byte, plus one FIFO write by the CPU.
+
+This does not make Tempo faster than a PRU: at 200 MHz a PRU core issues 32 times the instructions of one Tempo thread (25 MHz / 4) and places edges on a 5 ns grid. The measured benefit is instruction cost per byte, edge accuracy that does not depend on the software schedule, and concurrency on one thread. The software loop is hand-written and not proven optimal, and no pad timing is modeled. Reproduce: `python tools/bench_swlane.py --rtl` (about 2 min; without `--rtl`, model only).
+
 Cycle-level behavior asserted by tests (RTL suite in `test/`, 27/27 pass on 2026-09-30):
 
 - `test_demo_resident_multibus_with_busy_host_and_memory`: consecutive UART frames start exactly 500 cycles apart, every Manchester frame matches over all 1600 cycles, and a UART frame, a Manchester payload and a 300-cycle target stretch of SCL overlap inside one I2C write, while T2's scratch counter and SRAM constant read are checked.
