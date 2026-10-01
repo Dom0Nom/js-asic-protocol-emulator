@@ -23,8 +23,8 @@
   "PL_RESIZER_HOLD_SLACK_MARGIN": 0.1,
   "GRT_RESIZER_HOLD_SLACK_MARGIN": 0.05,
 
-  "//": "Electrical repair: the 25 MHz harden at c3ffca5 met timing but left max slew 135 (slow), max cap 13 and max fanout 213 (clock leaf buffers with 16-17 sinks). Post-GRT design repair and 8-sink CTS clusters target those; OPENROAD_THREADS unset gave single-threaded detailed routing.",
-  "RUN_POST_GRT_DESIGN_REPAIR": true,
+  "//": "Electrical repair: the 25 MHz harden at c3ffca5 met timing but left max slew 135 (slow), max cap 13 and max fanout 213 (clock leaf buffers with 16-17 sinks). 8-sink CTS clusters target those. Post-GRT design repair hung in RepairDesignPostGRT (harden at f02668d), so it stays off. OPENROAD_THREADS unset gave single-threaded detailed routing; 10 = PC cores minus 2.",
+  "RUN_POST_GRT_DESIGN_REPAIR": false,
   "CTS_SINK_CLUSTERING_SIZE": 8,
   "OPENROAD_THREADS": 10,
 
