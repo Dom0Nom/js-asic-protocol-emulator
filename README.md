@@ -14,13 +14,18 @@ USB low-speed PHY tests exist, but USB enumeration is unfinished.
 The verification compares every RTL pad and instruction commit with a Python
 cycle model. Independent target models check the protocols on the wire.
 Constrained-random programs and formal proofs cover the core's isolation and
-mailbox bounds. See [verification](docs/verification.md) and the
-[bug log](notes/bugs.md) for evidence and remaining work.
+mailbox bounds. See [verification](docs/verification.md) for evidence,
+the [bugs the method caught](docs/verification.md#bugs-the-method-caught)
+and remaining work.
 
 The declared clock is 25 MHz (40 ns; the RP2350 demo board makes it as
 150 MHz / 6). The previous routed design at 50 MHz missed slow-corner setup
-by 9.19 ns, so 50 MHz is a future target, not a claim. Signoff for the
-25 MHz build, with every count, is in [notes/area.md](notes/area.md).
+by 9.19 ns, so 50 MHz is a future target, not a claim. The routed 25 MHz
+build at `c3ffca5` (30,182 standard cells, 54% utilisation) meets setup at
+every corner (worst slow-corner slack +2.835 ns) with zero DRC, LVS, antenna
+and power-grid violations. Its Tiny Tapeout precheck failed the power-pin
+check (bug 54); the SRAM power plugin now leaves the cut columns out of
+the power port, and a new harden with that fix is pending.
 
 ## What it does differently
 
@@ -38,7 +43,16 @@ wiring and commands: [use cases](docs/use-cases.md).
 
 ## Run the checks
 
-With Icarus Verilog installed and the project Python environment active:
+Needs Icarus Verilog and Python 3.11 or newer. Set up the environment from
+the repository root:
+
+```sh
+uv venv --python 3.11 .venv     # or: python3 -m venv .venv
+source .venv/bin/activate
+uv pip install -r test/requirements.txt   # or: pip install -r test/requirements.txt
+```
+
+Then:
 
 ```sh
 cd tools

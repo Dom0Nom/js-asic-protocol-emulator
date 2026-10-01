@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Quick local synthesis against the sg13cmos5l typ liberty (copied to pdk/ from
-# the PC, see notes/progress.md). Prints cell count and area for one top module.
+# Quick local synthesis against the sg13cmos5l typ liberty. Expects the
+# ihp-sg13cmos5l PDK at ./pdk (copy or link). Prints cell count and area for one
+# top module.
 # usage: tools/synth.sh <top> [chparam args...]  (sources: src/*.v minus project.v)
 set -euo pipefail
 ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)

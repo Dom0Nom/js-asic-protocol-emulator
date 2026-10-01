@@ -20,7 +20,7 @@ The prior-art review and limits below qualify the novelty pitch.
 
 ### Critic review of the first draft and resolutions
 
-A fresh-context reviewer attacked the first draft (27 findings: 5 critical, 19 major, 3 minor). Full text archived in `notes/critic_architecture.md`. Resolutions:
+A fresh-context reviewer attacked the first draft (27 findings: 5 critical, 19 major, 3 minor). Resolutions:
 
 | # | Finding | Resolution |
 |---|---|---|
@@ -30,7 +30,7 @@ A fresh-context reviewer attacked the first draft (27 findings: 5 critical, 19 m
 | 4 | Area under-estimated by 40-50% | Accepted: re-estimated at about 12.5k cells. Cut-down lanes and 13-bit intra-slot offsets reduce it; latches for static lane config are the next lever if synthesis runs high. |
 | 5 | Two SRAM macros are the real physical risk | Accepted: one macro (IMEM 1024x16); data memory is a 32-word latch array plus `ldi` reads from IMEM for constant tables. GitHub CI and precheck before any significant RTL is a stop-and-ask item (pushing needs the user). |
 | 6 | Combinational pin resolution contradicts registered outputs | Accepted: resolved pad outputs are registered (one cycle, in the spec). |
-| 7 | Name the timing paths | Accepted: tracked in `notes/area.md` with each harden. |
+| 7 | Name the timing paths | Accepted: tracked with each harden. |
 | 8 | 16-bit time horizon | Partly accepted: per-lane prescaler (PRE) for long slots; `waitt` sets thread LATE for deadlines interpreted as past. Firmware must keep deadlines within 32767 cycles: farther targets are ambiguous, and timestamps a whole epoch away can alias an on-time deadline without LATE. Rebutted 24-bit `NOW`: registers are 16 bits, so wider time would need multi-word arithmetic; long timeouts loop in firmware. |
 | 9 | Config writes race queued commands | Accepted: `lw`, `start` and `sync` go through the command queue, in order. |
 | 10 | Firmware sketches did not assemble | Accepted: `andi` is now `simm9` (masks bytes), `xori` added, PC is 10 bits for 1024 words, sketches marked illustrative with the tested firmware in `fw/`. |
@@ -83,13 +83,13 @@ The simulator is a synchronous, cycle-level model of the whole chip, not an inst
 
 ## Use-case RTL batch, 2026-09-25
 
-Building the bench-tool use cases (`notes/use-case-plan.md`) and a fresh-context critic review of that plan turned up hardware needs that firmware cannot cover. They were made in one batch before the next harden, costed by synthesis of `tempo_core` against HEAD: 24,451 to 24,742 cells, 360.8k to 364.9k um² (+1.1%), 3,216 to 3,263 flops.
+Building the bench-tool use cases and a fresh-context critic review of that plan turned up hardware needs that firmware cannot cover. They were made in one batch before the next harden, costed by synthesis of `tempo_core` against HEAD: 24,451 to 24,742 cells, 360.8k to 364.9k um² (+1.1%), 3,216 to 3,263 flops.
 
 - `sti rd, rs`: threads store to the instruction SRAM (two slots, like `ldi`, through the thread's own fetch slot, so no other thread is delayed). Chosen over a deeper mailbox or a second RAM: the SRAM has ~800 spare words, which become receive buffers (UART console, bus monitor, edge capture) and emulated-device storage (a 24C02 image). Cost: two 26-bit latches.
 - External-clock receive (`MODE.XCLK`): a receive samples I on an edge of the C input instead of on its own timeline. Needed for passive SPI and I2C monitoring and for the receive half of target emulation; the firmware alternative (pattern event plus `ior`) loses bits silently because pattern events do not queue. Receive only: a transmit on an external clock would also be needed for an SPI target and was left out (cost and verification effort; I2C target transmit works with stretching and timed slots).
 - `CAP` latches only while no command runs (bug 18).
 - After an `emit`, C holds the emitted level (bug 17).
-- Host port on the RP2350's hardware SPI0 pins (SCK `ui[5]`, MOSI `ui[6]`, MISO `uo[3]`): the demo board for IHP shuttles carries an RP2350B (see `notes/research-host.md`), and `machine.SPI` moves bytes in C, where a Python bit-bang or PIO loop would bound every use case's throughput. Output index 11 moves to `uo[7]`. No cells.
+- Host port on the RP2350's hardware SPI0 pins (SCK `ui[5]`, MOSI `ui[6]`, MISO `uo[3]`): the demo board for IHP shuttles carries an RP2350B, and `machine.SPI` moves bytes in C, where a Python bit-bang or PIO loop would bound every use case's throughput. Output index 11 moves to `uo[7]`. No cells.
 - Mailbox commands return the count the port will take or give and never exceed it, plus an error-summary bit, and the status command reports each lane's flags (bug 19). The host never needs a status read to stay correct, and reads one only when the error bit is set.
 
 Not taken from the critic review, with reasons: a separate IMEM read/write port for threads (the fetch-slot reuse above gives the same buffering at a fraction of the area); a channel-tagged mailbox in hardware (a firmware dispatcher does it, see the resident image); a CMSIS-DAP shim on the RP2350 (out of scope for silicon; the host library is the API, and a PC transport over the RP2350's USB serial is planned).
@@ -110,8 +110,7 @@ A parallel decoded-register read trial reduced local mapped core area from
 passed. It is **not retained**: global routing required extended clock NDR
 retries, versus 5m41s for the baseline, and no higher usable clock
 speed was established. Routing is the binding constraint;
-a smaller synthesis number alone does not justify this tradeoff. The trial
-snapshot remains in `runs/experiments/resume_decoded` on the PC. Final RTL
+a smaller synthesis number alone does not justify this tradeoff. Final RTL
 retains the original register muxes and the validated index-width fixes.
 
 The SPI bulk firmware queues the next 16-bit transfer before receiving and

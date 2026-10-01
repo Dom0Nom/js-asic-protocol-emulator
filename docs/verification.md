@@ -6,12 +6,13 @@ input trace and ordered command tape, and no LATE/UNDER errors. Starting command
 from idle without an anchor can depend on firmware delivery. The all-mode
 guarantee remains unproven. The methodology checks the intended guarantee
 at several levels, each with a different failure mode it catches. Real
-defects and the layer that found them are logged in `notes/bugs.md`.
+defects and the layer that found them are summarised in
+[Bugs the method caught](#bugs-the-method-caught).
 
 An explicit model counterexample checks the omitted-anchor case: both
 programs issue the same PINS/LEN0/emit lane commands, but five extra CPU
 NOPs move the uo0 edge from cycle 27 to 47 with zero lane sticky flags
-and no illegal instructions (`runs/goal_unanchored_counterexample.json`).
+and no illegal instructions.
 That is intended unanchored behavior, and contradicts the former broader
 documentation claim. The current lane has fixed-width counters; the miter
 does not implement the narrowed-width abstraction proposed in early notes.
@@ -61,12 +62,12 @@ must preserve records read while waiting for readiness, every damaged record
 must be flagged, and an intact transaction must arrive after the backlog drains.
 
 The bug-fix source state at `376c03a` passes all 24 directed/use-case RTL tests,
-with no failures or skips and exit 0, on the PC (Icarus 14, cocotb 2.0.1,
+with no failures or skips and exit 0, on Linux (Icarus 14, cocotb 2.0.1,
 Python 3.12), 2026-09-26. All 73 simulation source hashes matched that
 checkout. Its complete Python suite also passes all 157 tests, including
 MicroPython replay and CLI sessions. These are simulation results; board
-verification and physical signoff remain pending. Logs and current limitations
-are recorded in `notes/progress.md`.
+verification and physical signoff remain pending. Current limitations are
+listed under [Not done yet](#not-done-yet).
 
 ### 5. Constrained-random lockstep
 
@@ -88,12 +89,12 @@ are recorded in `notes/progress.md`.
 
 Results:
 
-- `core.sby`, task `prove`: barrel isolation, mailbox bounds, valid simultaneous mailbox indices proven by k-induction (depth 8, bitwuzla), re-run PASS on 2026-09-30 (`runs/formal_0930_core_prove.log`). The proof covers only these asserted core invariants, with lanes replaced by unconstrained stubs, so they hold for any lane behaviour. Task `bmc` (depth 30) passes but is vacuous over thread execution: threads cannot start before step 36 (`notes/bugs.md` 53).
+- `core.sby`, task `prove`: barrel isolation, mailbox bounds, valid simultaneous mailbox indices proven by k-induction (depth 8, bitwuzla), re-run PASS on 2026-09-30. The proof covers only these asserted core invariants, with lanes replaced by unconstrained stubs, so they hold for any lane behaviour. Task `bmc` (depth 30) passes but is vacuous over thread execution: threads cannot start before step 36 (bug 53).
 - `lane_miter.sv`: the last run found no counterexample through step 14 and timed out at step 15. The timing-independence theorem remains unproven; it is not a passing depth-60 result.
 - `lane_anchor.sv` defines a separate short anchored-emit property and
   on-time/late cover goals. Its safety result is BMC depth 40 (bounded, not
-  a proof); its five covers were reached by the solver on 2026-09-30
-  (`runs/formal_0930_anchor_cover.log`). The miter now declares completion goals requiring
+  a proof); its five covers were reached by the solver on 2026-09-30.
+  The miter now declares completion goals requiring
   both full tapes to finish, at least one TX, enabled-high lane output and
   no LATE/UNDER. The stronger goal requires a TX/LW/TX payload, distinct
   enqueue schedules specifically for entries 2..4, and enabled low/high
@@ -103,7 +104,7 @@ Results:
   low, and the trailing LW could not configure high payload. The corrected
   TX/LW/TX goal has a deterministic two-copy RTL trace with low/high payload,
   differing push schedules, complete tapes and no LATE/UNDER or drive
-  mismatch (`runs/formal_miter_trace/fixed_tape.log`). Run
+  mismatch (the checker below writes its logs to `runs/formal_miter_trace/`). Run
   `.venv/bin/python formal/check_miter_trace.py` to reproduce both the old
   tape's missing strong cover and the corrected tape's completed covers.
   The checker compiles pre-run source snapshots and rejects concurrent
@@ -113,45 +114,40 @@ Results:
   This demonstrates reachability
   for that concrete schedule, not solver coverage or a general safety proof.
   The cover task also now shares the configured solver engine with BMC;
-  the pinned SBY parser confirms both task selections
-  (`runs/goal_miter_task_engine_check.log`).
+  the pinned SBY parser confirms both task selections.
   Task-tag behavior is described in the
   [SBY reference](https://symbiyosys.readthedocs.io/en/latest/reference.html#tasks-section).
   Solver witnesses for both miter covers were obtained on 2026-09-30 (see
-  "Formal witnesses and nonvacuity, 2026-09-30" below; traces in
-  `runs/formal_0930_witness/`). Safety remains bounded at step 14.
+  "Formal witnesses and nonvacuity, 2026-09-30" below). Safety remains
+  bounded at step 14.
 
-Run with `tools/pc.sh formal <job.sby> [task]`, which ships `formal/` and `src/` to the PC without touching a harden in progress.
+Run with `sby -f formal/<job>.sby [task]` (SymbiYosys, `smtbmc bitwuzla`); `core_cover.sby` builds its instrumented core copy itself through `formal/core_nv_gen.sh`.
 
 ### 7. Synthesis and physical gates
 
-`tools/synth.sh` synthesises any block against the IHP liberty on the Mac and fails on inferred latches or conflicting drivers; area per block is logged in `notes/area.md`. Full hardens run on the PC (`tools/pc.sh harden`) and in GitHub CI with the Tiny Tapeout precheck.
+`tools/synth.sh` synthesises any block against the IHP liberty and fails on inferred latches or conflicting drivers. Full hardens run LibreLane through the Tiny Tapeout flow (`.github/workflows/gds.yaml`), followed by the Tiny Tapeout precheck.
 
 The SRAM PDN step has unit tests for interval subtraction and LEF obstruction
 parsing. A pinned-flow probe checks the resulting OpenDB geometry independently:
 the old database has 32 Metal4 strap/pin shapes crossing SRAM obstructions,
 the clipped database has zero. PSM reports zero VPWR/VGND connectivity
 violations. This is geometry/connectivity evidence, not a new GDS, DRC or LVS
-signoff result. A deliberately one-second experiment returns timeout status
-124, verifying that the runner no longer hides flow failures.
+signoff result.
 
 Macro timing selection has three regressions using the actual IHP corner
 names. LibreLane's view filter also selects the matching supplied macro
-files in the resolved PC experiment config. This catches use of a typical
+files in a resolved experiment config. This catches use of a typical
 SRAM view at fast/slow corners; it does not establish timing closure.
 
-`tools/tests/test_public_export.py` creates disposable repositories and
-checks a complete export by source bytes, firmware regeneration,
-assembler/ISA execution and host imports. It also verifies that the source
-checkout, unrelated repositories and unreviewed destination edits survive
-rejected exports. `tools/tests/test_transport.py` checks that assumed host
+`tools/tests/test_transport.py` checks that assumed host
 call costs advance the live chip at its actual clock while preserving
 wire data. `tools/bench_rates.py` checks sustained SPI/UART transfers across
 host-cost scenarios; those are sensitivity predictions, not board timings.
 
 ## What each layer caught
 
-From `notes/bugs.md`:
+Per-layer index of bugs 1-46; all 54 are grouped by method in
+[Bugs the method caught](#bugs-the-method-caught).
 
 | Layer | Bugs |
 |---|---|
@@ -169,6 +165,35 @@ From `notes/bugs.md`:
 | Host/firmware negative protocol and image-switch tests | 37, 38, 39, 40, 41, 42, 43 |
 | Actual corner selection and resolved LibreLane view filtering | 44 |
 | Disposable complete-source export and destination regressions | 45, 46 |
+
+## Bugs the method caught
+
+The project bug log holds 54 real defects in the model, RTL, firmware, host
+library, flow and verification code, each with the check that exposed it.
+Testbench-only defects are logged separately and not counted here.
+
+| Caught by | Count | Bugs |
+|---|---|---|
+| Formal: timing miter and nonvacuity covers | 2 | 16, 53 |
+| RTL-vs-model lockstep | 1 | 7 |
+| Independent protocol models, use-case and host-library tests | 29 | 6, 8, 11, 12, 14, 15, 17, 20-28, 30-33, 37-43, 50, 51 |
+| Gate-level simulation | 1 | 52 |
+| Lint and per-block synthesis | 3 | 5, 9, 10 |
+| Review and independent audit: RTL against the model, writing firmware and host code against the spec, critic review, pin-map and tooling audits | 14 | 1-4, 13, 18, 19, 34, 36, 45-49 |
+| Physical flow audits and Tiny Tapeout precheck | 4 | 29, 35, 44, 54 |
+
+Constrained-random lockstep found no logged RTL defect; its coverage report
+did find that the generator never retired `call`, `djnz`, `jr`, `rx`,
+`hget`, `wev` or `ldi` (a testbench defect, since fixed).
+
+Notable examples:
+
+- 16 (formal): every `emit` ended a frame, so pin timing depended on firmware timing. The miter gave a counterexample at step 8; frames now end only on an `emit` with bit 7 set.
+- 53 (formal covers): the depth-30 core `bmc` task was vacuous, because threads cannot execute before step 36. Covers at depth 30 reached nothing; at depth 90 they reach thread execution at steps 36-39.
+- 12 (protocol model): USB receive at +1.5% clock error slipped a bit after a fast sender's edge re-synced a finished command. RTL and model agreed, so lockstep passed; only the independent USB check failed.
+- 10 (synthesis): one `integer` loop variable shared by a combinational and a sequential block made yosys infer latches with conflicting drivers. Icarus and Verilator lint passed it; `tools/synth.sh` now fails on it.
+- 52 (gate level): `test/Makefile` left out the IHP primitive library, so no gate-level netlist had ever compiled.
+- 54 (precheck): cutting VPWR columns around the SRAM also cut their port rectangles; the Tiny Tapeout pin check failed with 32 LEF errors on an otherwise clean harden.
 
 ## Not done yet
 
@@ -188,15 +213,15 @@ a one-cycle glitch and add a high level in the required idle window.
 Standalone Manchester also checks the queued start against NOW16 across
 wrap, accounting for the registered pad and prior-cycle device observation.
 No assertion here establishes electrical compliance or an unbounded
-timing-independence theorem; run status is in `notes/progress.md`.
+timing-independence theorem.
 
 ## Blocking-instruction coverage, 2026-09-30
 
 The plain random generator only emits `wev`, `hget` and `rx` behind a
 `wany` guard, so they retire only when their source is already ready. A
 model-only replay of the recorded 100-seed configuration
-(`runs/cov_0930_baseline_model.log`) reproduces the RTL log's retire counts
-(`wev=1 hget=5 rx=17`, `runs/resume_random100.log`) and shows that none of
+reproduces the RTL run's retire counts
+(`wev=1 hget=5 rx=17`) and shows that none of
 them ever blocked: 0 blocked cycles, 0 wakes.
 
 `test/test_blocking.py` adds RTL-vs-model lockstep cases for the blocking
@@ -224,15 +249,15 @@ Retired counts (immediate + woke), all RTL runs passed:
 | Run | wev | hget | rx | hput |
 |---|---|---|---|---|
 | Before: plain random, 100 seeds x 3000 cycles | 1 (0 woke) | 5 (0 woke) | 17 (0 woke) | 73 (0 woke) |
-| Directed, 4 cases (`runs/cov_0930_directed.log`) | 194 (155 woke) | 66 (8 woke) | 92 (48 woke) | 66 (62 woke) |
-| Biased, seeds 1-20 x 1500 (`runs/cov_0930_biased.log`) | 130 (48 woke) | 54 (54 woke) | 85 (38 woke) | 81 (12 woke) |
-| Biased, seeds 101-140 x 3000 (`runs/cov_0930_biased40.log`) | 521 (201 woke) | 215 (187 woke) | 373 (97 woke) | 226 (69 woke) |
+| Directed, 4 cases | 194 (155 woke) | 66 (8 woke) | 92 (48 woke) | 66 (62 woke) |
+| Biased, seeds 1-20 x 1500 | 130 (48 woke) | 54 (54 woke) | 85 (38 woke) | 81 (12 woke) |
+| Biased, seeds 101-140 x 3000 | 521 (201 woke) | 215 (187 woke) | 373 (97 woke) | 226 (69 woke) |
 
 Multi-waiter episodes (directed + both biased runs): wev 65, hget 149,
 rx 53, hput 49. Wake latency 0 was hit for all four (wev 142, hget 100,
 rx 91, hput 87). `wev` wake latency never exceeds 2 by construction: a
 thread's own `sev` cannot wake itself, so latency 3 is unreachable.
-`runs/cov_0930_directed_first_tbfail.log` is the first directed run: the
+In the first directed run the
 lockstep matched, but the testbench's own scenario threshold for immediate
 `hget` failed (1 of 5) because thread 0 drained H2T; thread 0 now delays
 before `hput` and the host drains T2H when H2T is full.
@@ -244,30 +269,30 @@ The module is not in the default `COCOTB_TEST_MODULES`.
 
 ## Random lockstep and gate-level runs, 2026-09-30
 
-Plain random lockstep on the harden commit's RTL (`c3ffca5`, `src/` unchanged since): 100 seeds x 3000 cycles, 22,539 commits matched between RTL and the Python model, pass (`runs/rand100_0930.log`, 781 s).
+Plain random lockstep on the harden commit's RTL (`c3ffca5`, `src/` unchanged since): 100 seeds x 3000 cycles, 22,539 commits matched between RTL and the Python model, pass (781 s).
 
-Gate-level simulation had never run: `test/Makefile` left out the IHP primitive library (`notes/bugs.md` 52). With that fixed, `tools/gl_run.sh <netlist> <tag> "<tests>"` runs named cocotb cases against a netlist in a scratch copy of `test/` (`GATES=yes`, `NODUMP=yes`), with the functional SRAM model. Against a yosys netlist mapped to the IHP typ library (`runs/gl/synth_netlist.v`, sha256 `06ef5ee7...`, 24,149 cell instances, pre-placement, zero-delay), all eight UART/SPI/I2C cases pass (`runs/gl_synth_0930.log`): `test_host_boot_and_uart_tx`, `test_uart_rx_fast_sender`, `test_spi_mode3_flash_read`, `test_spi_mode0_jedec`, `test_i2c_write_read_with_stretching`, `test_uc2_i2c_bringup`, `test_uc3_spi_flash_programmer`, `test_uc1_uart_autobaud_console`. This checks that synthesis preserves function; it is not the post-route netlist and carries no timing. The post-route result is recorded below when the harden completes.
+Gate-level simulation had never run: `test/Makefile` left out the IHP primitive library (bug 52). With that fixed, `tools/gl_run.sh <netlist> <tag> "<tests>"` runs named cocotb cases against a netlist in a scratch copy of `test/` (`GATES=yes`, `NODUMP=yes`), with the functional SRAM model. Against a yosys netlist mapped to the IHP typ library (sha256 `06ef5ee7...`, 24,149 cell instances, pre-placement, zero-delay), all eight UART/SPI/I2C cases pass: `test_host_boot_and_uart_tx`, `test_uart_rx_fast_sender`, `test_spi_mode3_flash_read`, `test_spi_mode0_jedec`, `test_i2c_write_read_with_stretching`, `test_uc2_i2c_bringup`, `test_uc3_spi_flash_programmer`, `test_uc1_uart_autobaud_console`. This checks that synthesis preserves function; it is not the post-route netlist and carries no timing. The post-route result is recorded below when the harden completes.
 
 ## Formal witnesses and nonvacuity, 2026-09-30
 
-All jobs: SymbiYosys, engine `smtbmc bitwuzla`, run on the PC through
-`tools/pc.sh formal` with `FORMAL_TIMEOUT=900`, one at a time. Every job here
+All jobs: SymbiYosys, engine `smtbmc bitwuzla`, run with a 900 s
+timeout, one at a time. Every job here
 is `mode cover`: a PASS shows the named states are reachable under the job's
 assumptions (a solver witness). None of these is a safety proof, and none
 changes the bounds of the safety jobs in section 6. `src/` was not modified;
 the core covers are included into a generated copy of `tempo_core.v`
 (`formal/core_nv_gen.sh`, `formal/core_nv.vh`).
 
-| Job | Task | Depth limit | Result | Wall | Log |
-|---|---|---|---|---|---|
-| `lane_miter.sby` | `cover` | 60 | PASS, both covers (step 9, step 12) | 30 s | `runs/formal_0930_miter_cover.log` |
-| `lane_miter.sby` | `cover_hint` | 45 | PASS, both covers (step 38) | 169 s | `runs/formal_0930_miter_cover_hint.log` |
-| `lane_anchor.sby` | `cover` | 40 | PASS, 5 of 5 covers (steps 5-7) | 4 s | `runs/formal_0930_anchor_cover.log` |
-| `core_cover.sby` | `cover` | 90 | Timeout at 900 s; 5 of 5 thread covers reached (steps 36-39), plus `hp_h2t_v` at step 48 in the earlier ungrouped run | 900 s | `runs/formal_0930_core_cover.log`, `runs/formal_0930_core_cover_novcd.log` |
-| `core_cover.sby` | `cover_host` | 90 | Timeout at 900 s; 2 of 4 reached, 2 unresolved | 900 s | `runs/formal_0930_core_cover_host.log` |
+| Job | Task | Depth limit | Result | Wall |
+|---|---|---|---|---|
+| `lane_miter.sby` | `cover` | 60 | PASS, both covers (step 9, step 12) | 30 s |
+| `lane_miter.sby` | `cover_hint` | 45 | PASS, both covers (step 38) | 169 s |
+| `lane_anchor.sby` | `cover` | 40 | PASS, 5 of 5 covers (steps 5-7) | 4 s |
+| `core_cover.sby` | `cover` | 90 | Timeout at 900 s; 5 of 5 thread covers reached (steps 36-39), plus `hp_h2t_v` at step 48 in the earlier ungrouped run | 900 s |
+| `core_cover.sby` | `cover_host` | 90 | Timeout at 900 s; 2 of 4 reached, 2 unresolved | 900 s |
 
-Witness traces: `runs/formal_0930_witness/miter_cover/` and
-`.../miter_cover_hint/` (VCD and Yosys witness files).
+SBY writes the witness traces (VCD and Yosys witness files) into each
+job's output directory.
 
 What each covers:
 
@@ -311,25 +336,25 @@ the covers above show that the states the isolation and mailbox asserts are
 about are reachable under the same assumptions. The HGET and T2H-pop
 preconditions remain without a witness.
 
-Core invariants re-proved this session on the harden RTL: `formal/core.sby` task `prove`, k-induction depth 8, `smtbmc bitwuzla`, PASS (basecase and induction), 7 s (`runs/formal_0930_core_prove.log`). This is an unbounded proof of the asserted core invariants because the induction step starts from any state satisfying them. The depth-30 `bmc` task adds nothing about running threads (they cannot start before step 36; `notes/bugs.md` 53).
+Core invariants re-proved on 2026-09-30 on the harden RTL: `formal/core.sby` task `prove`, k-induction depth 8, `smtbmc bitwuzla`, PASS (basecase and induction), 7 s. This is an unbounded proof of the asserted core invariants because the induction step starts from any state satisfying them. The depth-30 `bmc` task adds nothing about running threads (they cannot start before step 36; bug 53).
 
-Committed-tree reruns, 2026-09-30: from a clean worktree at `fbd3292` (header line records commit and zero dirty files), RTL suite 27/27 (`runs/rtl_fbd3292.log`, 2555 s) and Python suite 193/193 (`runs/py_fbd3292.log`, 915 s). `src/`, `test/`, `tools/`, `host/` and `fw/` at later commits differ only in docs and `tools/bench_rates.py`'s head fallback. Complete-source export of `fbd3292`: 165 files; in the export, image check passes, 193/193 Python tests, three cocotb protocol cases pass, `bench_rates.py` runs without git history (`runs/export_fbd3292.log`).
+Committed-tree reruns, 2026-09-30: from a clean worktree at `fbd3292` (header line records commit and zero dirty files), RTL suite 27/27 (2555 s) and Python suite 193/193 (915 s). `src/`, `test/`, `tools/`, `host/` and `fw/` at later commits differ only in docs and `tools/bench_rates.py`'s head fallback. Complete-source export of `fbd3292`: 165 files; in the export, image check passes, 193/193 Python tests, three cocotb protocol cases pass, `bench_rates.py` runs without git history.
 
 Longer formal runs, 2026-09-30 (PC threads left idle by single-threaded detailed routing):
 
-| Job | Task | Result | Time | Log |
-|---|---|---|---|---|
-| `core.sby` | `bmc_deep`, BMC depth 50 | PASS, no counterexample. Threads can run from step 36, so this bounds isolation/mailbox asserts over about 14 cycles of execution; bounded, not a proof. | 417 s | `runs/formal_0930_long_fcore.log` |
-| `core_cover.sby` | `cover_host`, depth 90 | PASS: all 4 host covers reached, including the HGET commit and host T2H pop left unresolved earlier | 3920 s | `runs/formal_0930_long_fcov.log` (the trailing `rc=127` is from `tools/pc.sh` being edited while the job ran; SBY reports `DONE (PASS, rc=0)`) |
-| `lane_miter.sby` | `bmc`, depth 60 | Timed out at 5000 s while checking step 15; no counterexample through step 14. Unchanged from 2026-09-26. | 5000 s | PC `runs/fmiter/sby.log`; local `runs/formal_0930_long_fmiter.log` has only the timeout code |
+| Job | Task | Result | Time |
+|---|---|---|---|
+| `core.sby` | `bmc_deep`, BMC depth 50 | PASS, no counterexample. Threads can run from step 36, so this bounds isolation/mailbox asserts over about 14 cycles of execution; bounded, not a proof. | 417 s |
+| `core_cover.sby` | `cover_host`, depth 90 | PASS: all 4 host covers reached, including the HGET commit and host T2H pop left unresolved earlier | 3920 s |
+| `lane_miter.sby` | `bmc`, depth 60 | Timed out at 5000 s while checking step 15; no counterexample through step 14. Unchanged from 2026-09-26. | 5000 s |
 
-The five thread covers (`core_cover.sby` task `cover`) also completed in a separate run: `DONE (PASS)`, all five reached at steps 36-39, 921 s (`runs/formal_0930_long_fcov_thread.log`). With these, all nine core nonvacuity covers have solver witnesses in completed runs. The lane timing-independence theorem remains bounded at 14 steps for the constrained tape family.
+The five thread covers (`core_cover.sby` task `cover`) also completed in a separate run: `DONE (PASS)`, all five reached at steps 36-39, 921 s. With these, all nine core nonvacuity covers have solver witnesses in completed runs. The lane timing-independence theorem remains bounded at 14 steps for the constrained tape family.
 
-Gate-level lockstep scope (`test/lockstep.py`): in gate-level runs the internal instruction-commit comparison is off, because the netlist has no `commit_o` to probe ("0 commits matched" in `runs/gl_synth_0930.log`). The per-cycle pad comparison against the Python cycle model stays on (every output value and output enable, e.g. 6,881 cycles in the UART boot case), alongside the independent wire-level protocol models.
+Gate-level lockstep scope (`test/lockstep.py`): in gate-level runs the internal instruction-commit comparison is off, because the netlist has no `commit_o` to probe (the gate-level log reports "0 commits matched"). The per-cycle pad comparison against the Python cycle model stays on (every output value and output enable, e.g. 6,881 cycles in the UART boot case), alongside the independent wire-level protocol models.
 
 ### Gate level on the routed netlist, 2026-09-30
 
-Netlist: `runs/pc/runs/wokwi/final/nl/tt_um_dom0nom_protoemu.nl.v` from the `c3ffca5` harden (`final/commit_id.json` names `c3ffca5`; sha256 `4a099941...`, 76,376 cell instances including fill). All ten cases pass, zero-delay, with the per-cycle pad comparison against the Python model and the independent wire models (`runs/gl_route_g1.log` .. `g4.log`; the trailing `rc=2` in g2/g3 is a shell syntax error from editing `tools/gl_run.sh` after all their tests had passed):
+Netlist: `final/nl/tt_um_dom0nom_protoemu.nl.v` from the `c3ffca5` harden (`final/commit_id.json` names `c3ffca5`; sha256 `4a099941...`, 76,376 cell instances including fill). All ten cases pass, zero-delay, with the per-cycle pad comparison against the Python model and the independent wire models:
 
 | Case | Protocol | Wall time |
 |---|---|---|
@@ -344,6 +369,6 @@ Netlist: `runs/pc/runs/wokwi/final/nl/tt_um_dom0nom_protoemu.nl.v` from the `c3f
 | `test_demo_resident_multibus_with_busy_host_and_memory` | UART + Manchester + I2C + compute in one image | 681 s |
 | `test_demo_manchester_frame_scheduled_across_counter_wrap` | Manchester line code from firmware | 189 s |
 
-Timing-annotated gate level (same `c3ffca5` netlist): `SDF=<corner sdf> TEMPO_CLK_NS=40 tools/gl_run.sh ...` compiles with `-gspecify -ginterconnect`, back-annotates the LibreLane SDF (all 27,245 standard-cell and interconnect entries; the SRAM macro entry is dropped because Icarus cannot parse its bus-indexed IOPATHs and its behavioral model has no specify block, so the 7.1-7.3 ns SRAM read delay is covered by STA only) and runs at the declared 40 ns period. `test_host_boot_and_uart_tx`, `test_spi_mode3_flash_read` and `test_i2c_write_read_with_stretching` pass at the slow (1.08 V, 125 C) and fast (1.32 V, -40 C) corners (`runs/gl_sdf_slow.log`, `runs/gl_sdf_fast.log`); the only SDF messages are "Chosen value not defined" for the header VOLTAGE/TEMPERATURE triples. Icarus does not evaluate TIMINGCHECK entries, so setup/hold are checked by STA, not by this simulation.
+Timing-annotated gate level (same `c3ffca5` netlist): `SDF=<corner sdf> TEMPO_CLK_NS=40 tools/gl_run.sh ...` compiles with `-gspecify -ginterconnect`, back-annotates the LibreLane SDF (all 27,245 standard-cell and interconnect entries; the SRAM macro entry is dropped because Icarus cannot parse its bus-indexed IOPATHs and its behavioral model has no specify block, so the 7.1-7.3 ns SRAM read delay is covered by STA only) and runs at the declared 40 ns period. `test_host_boot_and_uart_tx`, `test_spi_mode3_flash_read` and `test_i2c_write_read_with_stretching` pass at the slow (1.08 V, 125 C) and fast (1.32 V, -40 C) corners; the only SDF messages are "Chosen value not defined" for the header VOLTAGE/TEMPERATURE triples. Icarus does not evaluate TIMINGCHECK entries, so setup/hold are checked by STA, not by this simulation.
 
-Final committed-tree reruns: from a clean worktree at `d792435` (after the gate-level, SDF and clock-knob test changes), RTL 27/27 (`runs/rtl_d792435.log`) and Python 193/193 (`runs/py_d792435.log`); later commits change only docs and notes.
+Final committed-tree reruns: from a clean worktree at `d792435` (after the gate-level, SDF and clock-knob test changes), RTL 27/27 and Python 193/193; later commits change only docs.

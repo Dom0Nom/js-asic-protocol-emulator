@@ -1,6 +1,6 @@
 # Architecture
 
-This document compares three candidate architectures, scores them, and specifies the chosen one, Tempo, precisely enough to build the simulator, assembler and RTL from it. Background and citations are in `docs/research.md`. The decision record, including the critic review of an earlier draft and how each finding was resolved, is in `docs/decisions.md`.
+This document compares three candidate architectures, scores them, and specifies the chosen one, Tempo, precisely enough to build the simulator, assembler and RTL from it. The decision record, including the critic review of an earlier draft and how each finding was resolved, is in `docs/decisions.md`.
 
 ## Constraints that shape every candidate
 
@@ -11,7 +11,7 @@ Numbers measured in this repo unless marked otherwise.
 - SRAM macros (IHP, 1 port, synchronous read, 6.25 ns clock-to-data at the slow corner): 512x16 is 236.8 x 191.3 um (45k um²), 1024x16 is 236.8 x 336.5 um (80k um²). One SRAM bit costs about 10 um² against about 67 um² for a writable flop, so memory belongs in SRAM.
 - The TT IHP power grid cannot reach SRAM supply pins without an extra flow step (see `docs/decisions.md`). Every macro adds physical risk, so the design uses exactly one.
 - A single-port SRAM gives one access per cycle, so several state machines cannot each fetch an instruction every cycle from one shared macro.
-- IO: 8 inputs, 8 outputs, 8 bidirectional pins, all through the TT mux, no synchronisers in the harness. The IO evidence collected in `docs/research.md` does not establish a supported CMOS5L pad rate. USB low-speed digital PHY behavior is tested in simulation; electrical compliance and enumeration remain unverified. 10BASE-T needs 50 ns pulses and is unproven.
+- IO: 8 inputs, 8 outputs, 8 bidirectional pins, all through the TT mux, no synchronisers in the harness. Published IO evidence does not establish a supported CMOS5L pad rate (`docs/benchmarks.md`, IO path assumptions). USB low-speed digital PHY behavior is tested in simulation; electrical compliance and enumeration remain unverified. 10BASE-T needs 50 ns pulses and is unproven.
 - Clock: 25 MHz declared (40 ns); 50 MHz is a future target (the 50 MHz routed design missed slow-corner setup by 9.19 ns). The demo-board RP2350 supplies the project clock; `Link.clock_hz` must match its actual configured frequency.
 - Programs, data and control reach the chip only through those pins, so every candidate needs a host port.
 - Schedule: one developer with AI assistance, 2026-09-25 to 2027-01-18, holidays included.
@@ -45,13 +45,13 @@ Tempo separates what the firmware decides from when the pins move. Its intended 
 5. **Clocked and open-drain pins are first class.** A lane drives a clock pulse inside the slot (SPI modes 0-3, JTAG, SWD, I2C), can run D and C open-drain, freezes its timeline while a stretched clock is held low, and in arbitration mode stops driving at the first lost bit (I2C multi-master, CAN).
 6. **Detectable errors have sticky flags.** Late starts and `waitt` deadlines within the supported timestamp horizon, empty transmit queues with FRAME enabled, receive FIFO overruns, stuffing errors and lost arbitration are reported. These flags do not diagnose every timing or protocol failure.
 
-**Timing-independence claim under verification.** Within a frame anchored to the same start time, with FRAME remaining enabled through its final EOF, the same initial lane state, input trace and ordered command tape, command-delivery variation should not change lane output timing while neither execution reports LATE/UNDER. The current two-copy miter checks a limited six-entry tape on a full-width lane; its proof and completion witnesses remain unfinished. It compares internal drive states and ownership, not the whole chip's pad resolver. Unanchored commands intentionally start when delivered: five extra CPU NOPs before the same `emit` shift an output edge from cycle 27 to 47 with no error flags (`runs/goal_unanchored_counterexample.json`). Identical command order alone is insufficient. Dynamic model/RTL checks exercise scheduled starts and workload variation. See `docs/verification.md` for the exact scope and evidence.
+**Timing-independence claim under verification.** Within a frame anchored to the same start time, with FRAME remaining enabled through its final EOF, the same initial lane state, input trace and ordered command tape, command-delivery variation should not change lane output timing while neither execution reports LATE/UNDER. The current two-copy miter checks a limited six-entry tape on a full-width lane; its proof and completion witnesses remain unfinished. It compares internal drive states and ownership, not the whole chip's pad resolver. Unanchored commands intentionally start when delivered: five extra CPU NOPs before the same `emit` shift an output edge from cycle 27 to 47 with no error flags. Identical command order alone is insufficient. Dynamic model/RTL checks exercise scheduled starts and workload variation. See `docs/verification.md` for the exact scope and evidence.
 
 Closest prior art, and what is borrowed: barrel threads and timed, timestamped ports are XMOS XS1. NRZI and stuffing in pin hardware exist in Propeller 2 smart pins (USB mode). Fractional timing with 8 fractional bits matches the RP2040 PIO clock divider. Tempo's contributions are the symbol table as a general line-code primitive, stretch-aware and arbitration-aware clocked lanes, capture-to-FIFO, and the timing-independence property under verification (bounded so far), all within the 6x4 Tiny Tapeout allocation.
 
 ### Measured comparison with PIO and PRU
 
-Tempo sizes are SRAM words the assembler emits for `fw/` (16-bit, parameter blocks included). PIO sizes are instructions (also 16-bit) in the `raspberrypi/pico-examples` programs. Commands and output: `runs/compare_0930.log`.
+Tempo sizes are SRAM words the assembler emits for `fw/` (16-bit, parameter blocks included). PIO sizes are instructions (also 16-bit) in the `raspberrypi/pico-examples` programs.
 
 | | Tempo | RP2040 PIO [1] | AM335x PRU-ICSS [2] |
 |---|---|---|---|
@@ -73,7 +73,7 @@ Firmware size per protocol, Tempo against the PIO programs in `pico-examples`. P
 
 Per protocol, PIO programs are smaller: Tempo firmware also carries the host command protocol, framing and error handling that PIO examples leave to the Cortex-M0+. The measured difference is what one on-chip store holds without a CPU: all of `demo_multibus`, with 894 words left. Tempo is not faster; PRU runs 8 times the declared clock per core.
 
-Cycle-level behavior asserted by tests (RTL runs in `runs/rtl_0930.log`, 27/27 pass):
+Cycle-level behavior asserted by tests (RTL suite in `test/`, 27/27 pass on 2026-09-30):
 
 - `test_demo_resident_multibus_with_busy_host_and_memory`: consecutive UART frames start exactly 500 cycles apart, every Manchester frame matches over all 1600 cycles, and a UART frame, a Manchester payload and a 300-cycle target stretch of SCL overlap inside one I2C write, while T2's scratch counter and SRAM constant read are checked.
 - `test_demo_manchester_frame_scheduled_across_counter_wrap`: a frame scheduled with `start` begins 2 cycles after its deadline at both tested phases, including a frame that straddles the 16-bit counter wrap and a deadline that wraps itself.
@@ -85,7 +85,7 @@ Cycle-level behavior asserted by tests (RTL runs in `runs/rtl_0930.log`, 27/27 p
 Direct bit-banging stays first class. A thread can move any lane pin with cycle-exact timing using `start` (schedule) plus `emit` (raw levels), without any line coding. Protocols with no use for the coding pipeline, such as PS/2 or custom sensor buses, are written this way.
 
 - Program loading: host SPI port on 4 pins (`ui[7:5]`, `uo[3]`) writes the instruction SRAM, sets thread PCs, starts, stops and single-steps threads, reads registers of halted threads, and exchanges words with firmware through mailbox FIFOs while threads run.
-- Size: the early 12.5k-cell estimate understated the implemented design. The current implementation has two full lanes and one lite lane; synthesis and physical results, including timing and electrical failures, are recorded in `notes/area.md`. Use those measured results when evaluating fit and headroom.
+- Size: the early 12.5k-cell estimate understated the implemented design. The current implementation has two full lanes and one lite lane; the routed 25 MHz build has 30,182 standard cells at 54% utilisation of the 6x4 tiles; the README gives its timing and signoff status. Use those measured results when evaluating fit and headroom.
 
 ## Firmware sketches
 

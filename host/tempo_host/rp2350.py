@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tempo on the Tiny Tapeout demo board (ETR, RP2350B), MicroPython only.
 
-The host port uses the RP2350's hardware SPI0 (notes/research-host.md,
-section 4c; pin map from tt-micropython-firmware gpio_map_dbv3.py):
+The host port uses the RP2350's hardware SPI0 (pin map from
+tt-micropython-firmware gpio_map_dbv3.py):
 
     HSCK  = ui_in[5]  = GPIO22 (SPI0 SCK)
     HMOSI = ui_in[6]  = GPIO23 (SPI0 TX)

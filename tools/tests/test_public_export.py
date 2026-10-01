@@ -1,4 +1,5 @@
-"""A submission must contain runnable firmware, tools and verification."""
+"""A submission must contain runnable firmware, tools and verification, and
+nothing tied to local machines or working notes."""
 
 import os
 from pathlib import Path
@@ -54,11 +55,21 @@ def test_public_export_is_runnable(source, tmp_path, precreated):
                 "fw/demo_multibus.s", "fw/manchester.s", "fw/manchester_core.inc",
                 "tools/tempo/models/linecode.py", "tools/tempo/demo_checks.py",
                 "tools/tests/test_demos.py",
-                "notes/area.md", "notes/bugs.md", ".github/workflows/gds.yaml",
-                ".github/workflows/test.yaml", "src/project.v"]
+                "tools/gl_run.sh", "tools/tempo_cli.py", "info.yaml",
+                "librelane_plugin_sram_pdn.py", "flow/odb_sram_stripes.py",
+                ".github/workflows/gds.yaml", ".github/workflows/test.yaml",
+                "src/project.v"]
     for name in required:
         assert (dst / name).is_file(), "Export omits " + name
         assert (dst / name).read_bytes() == (source / name).read_bytes(), name
+    exported = set(run("git", "ls-files", cwd=dst).stdout.split())
+    private = ("CLAUDE.md", ".claude/", ".vscode/", ".devcontainer/", "prompts/",
+               "notes/", "runs/", "docs/readiness.md", "docs/competition/",
+               "docs/research.md", "tools/pc.sh", "tools/ctx_guard.py",
+               "tools/export_public.sh", "tools/tests/test_public_export.py",
+               ".github/workflows/fpga.yaml")
+    leaked = sorted(n for n in exported if n.startswith(private))
+    assert not leaked, leaked
     # Assemble every image from the exported source and run independent ISA
     # tests in a fresh process whose cwd/import path is the exported checkout.
     run(sys.executable, "tools/gen_images.py", "--check", cwd=dst)
@@ -89,3 +100,14 @@ def test_export_preserves_unreviewed_destination_changes(source, tmp_path):
     result = run("bash", "tools/export_public.sh", str(dst), cwd=source, check=False)
     assert result.returncode != 0, result.stdout
     assert (dst / "README.md").read_text() == "Unreviewed local edits\n"
+
+
+def test_export_rejects_private_paths(source, tmp_path):
+    dst = tmp_path / "export"
+    readme = source / "README.md"
+    readme.write_text(readme.read_text() + "\nLocal copy: /Users/someone/x\n")
+    run("git", "-c", "user.name=Export test", "-c",
+        "user.email=export@example.invalid", "commit", "-qam", "Leak", cwd=source)
+    result = run("bash", "tools/export_public.sh", str(dst), cwd=source, check=False)
+    assert result.returncode != 0, result.stdout
+    assert "README.md" in result.stdout
