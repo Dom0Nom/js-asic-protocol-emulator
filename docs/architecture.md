@@ -173,7 +173,7 @@ data:   ld   r4, [r6 + 0]
 
 ## Scoring
 
-Each criterion 1 (poor) to 5 (strong). These are historical architecture-selection estimates with our own weights, not Jane Street scores or measured readiness. The first draft had no schedule criterion and scored full Tempo too kindly; the critic's rescoring is retained for the decision history. Current evidence and requirements are in `docs/readiness.md`.
+Each criterion 1 (poor) to 5 (strong). These are historical architecture-selection estimates with our own weights, not Jane Street scores or measured readiness. The first draft had no schedule criterion and scored full Tempo too kindly; the critic's rescoring is retained for the decision history. Current evidence is in [verification](verification.md#current-evidence-at-the-harden-commit).
 
 | Criterion (weight) | A: PIO-plus | B: RISC + timed IO | Tempo, full draft | Tempo (chosen) |
 |---|---|---|---|---|
