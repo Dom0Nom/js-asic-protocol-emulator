@@ -2,6 +2,8 @@
 """RTL tests: every test runs the RTL in lockstep with the cycle-level model
 (test/lockstep.py) and checks the wire with an independent protocol model."""
 
+import os
+
 import cocotb
 
 from lockstep import Lockstep
@@ -108,21 +110,24 @@ async def test_i2c_write_read_with_stretching(dut):
 @cocotb.test()
 async def test_usb_ls_rx_and_tx(dut):
     from tempo.models.usb_ls import UsbLsReceiver, UsbLsTransmitter
-    ls = Lockstep(dut, '.include "usb_ls_phy.s"\n', pullups={"uio6"})
+    clk_khz = 1_000_000 // int(os.environ.get("TEMPO_CLK_NS", "20"))  # firmware and models follow the sim clock
+    clock_hz = clk_khz * 1000
+    bits = lambda n: int(n * clock_hz / 1.5e6) + 1  # noqa: E731
+    ls = Lockstep(dut, f'.equ USB_CLK_KHZ, {clk_khz}\n.include "usb_ls_phy.s"\n', pullups={"uio6"})
     await ls.start()
     await ls.boot()
     await ls.run(300)
-    tx = ls.attach(UsbLsTransmitter("uio7", "uio6", bit_rate_error=0.015))
+    tx = ls.attach(UsbLsTransmitter("uio7", "uio6", clock_hz=clock_hz, bit_rate_error=0.015))
     tx.send_data("DATA1", bytes([0xFF, 0xFF, 0x7E, 0x00, 0x81]))
-    await ls.run(34 * 90)
+    await ls.run(bits(90))
     words = await ls.mbox_read(6)  # 9 bytes in 5 words, then the end word
     b = [x for w in words[:5] for x in (w & 0xFF, w >> 8)][:9]
     assert b[:7] == [0x80, 0x4B, 0xFF, 0xFF, 0x7E, 0x00, 0x81], [hex(w) for w in words]
     assert words[5] == 0xE000 | 0x100 | 9 << 4, [hex(w) for w in words]  # residual ok, 9 bytes
     # answer with ACK through lane 0; the model checks the waveform
-    rx = ls.attach(UsbLsReceiver("uio7", "uio6"))
+    rx = ls.attach(UsbLsReceiver("uio7", "uio6", clock_hz=clock_hz))
     await ls.mbox_write([0xD2])  # ACK PID byte, no data, no CRC
-    await ls.run(34 * 30)
+    await ls.run(bits(30))
     assert [p.pid for p in rx.packets][-1] == "ACK", (rx.packets, rx.errors)
     assert not rx.errors
     assert not ls.board.contention, ls.board.contention[:4]

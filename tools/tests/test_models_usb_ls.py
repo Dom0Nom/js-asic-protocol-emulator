@@ -58,7 +58,7 @@ def test_crc5_crc16_self_consistency_spot_check():
 # Packet round trips
 # ---------------------------------------------------------------------
 
-CLOCK_HZ = 24e6  # 16 cycles/bit at 1.5 Mbit/s
+CLOCK_HZ = 25e6  # declared core clock: 16.67 cycles/bit at 1.5 Mbit/s
 
 
 def test_token_roundtrip():

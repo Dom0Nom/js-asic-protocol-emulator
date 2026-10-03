@@ -1,4 +1,5 @@
-; USB low-speed (1.5 Mbit/s) packet PHY, 50 MHz clock.
+; USB low-speed (1.5 Mbit/s) packet PHY.
+; Needs USB_CLK_KHZ, the core clock in kHz (25000 at the declared 25 MHz).
 ; D- on uio6, D+ on uio7. Idle J (D- high) comes from the device-side
 ; pull-up on D-. Lane 0 transmits, lane 1 receives.
 ;
@@ -14,8 +15,9 @@
 ; Packets longer than 16 bytes (SYNC + PID + 8 data + CRC16 is 12) are cut.
 
         .include "tempo.inc"
-        .equ BITLEN, 33                     ; 50e6 / 1.5e6 = 33.333 cycles
-        .equ BITFRAC, 85                    ; .333 * 256
+        .equ BIT256, (USB_CLK_KHZ * 256 + 750) / 1500   ; cycles per bit * 256, rounded
+        .equ BITLEN, BIT256 >> 8            ; 25 MHz: 16 + 171/256 = 16.668 cycles
+        .equ BITFRAC, BIT256 & 255
         .equ DM, UIO0 + 6
         .equ DP, UIO0 + 7
         .equ USB_CFG, CFG_NRZI | (6 << CFG_STUFF_SH)
@@ -90,30 +92,37 @@ usb_rx:
         lc   r6, 0xFFFF
         lc   r7, RESIDUAL
         rxn  l1, 8                          ; SYNC of the first packet, starts on SOP
-rx_pkt: rxn  l1, 8, c                       ; PID, continues the frame
-        lw   l1, crc, r6                    ; applied between PID and first data byte
-        li   r1, 0                          ; byte index
-rx_byte:
+        rxn  l1, 8, c                       ; PID, continues the frame
+rx_pkt: lw   l1, crc, r6                    ; applied between PID and first data byte
+        li   r3, 0                          ; word index
+rx_even:
         rxn  l1, 8, c                       ; keep one receive queued ahead
         rx   r2, l1
-        bcs  rx_end                         ; C: cut short by SE0
-        shri r3, r1, 1                      ; word index
-        mov  r4, r1
-        andi r4, 1
-        bne  rx_odd
-        st   r2, [r3 + 0]
-        addi r1, 1
-        bra  rx_byte
-rx_odd: ld   r4, [r3 + 0]
-        shli r2, r2, 8
+        bcs  rx_end_e                       ; C: cut short by SE0
+        rxn  l1, 8, c
+        rx   r4, l1
+        bcs  rx_end_o
+        swab r4, r4
         or   r4, r4, r2
         st   r4, [r3 + 0]
-        addi r1, 1
-        bra  rx_byte
-rx_end: stat r3, l1                         ; bit count of the cut-short word in [15:11]
+        addi r3, 1
+        bra  rx_even                        ; at most 8 slots between receives: SE0 to SOP can be 3 bit times
+rx_end_o:
         stop l1                             ; drop the receive queued ahead
-        rxn  l1, 8                          ; re-arm for the next SOP first: the gap can be 2 bit times
-        lr   r4, l1, crc                    ; the CRC reset for the next packet is not queued yet
+        rxn  l1, 8                          ; re-arm for the next SOP first
+        lr   r4, l1, crc                    ; before SYNC bits reach the CRC; the reset is queued at rx_pkt
+        rxn  l1, 8, c                       ; PID: queued before SYNC ends, the push below takes longer
+        st   r2, [r3 + 0]
+        shli r1, r3, 1
+        addi r1, 1                          ; byte count
+        bra  rx_fin
+rx_end_e:
+        stop l1
+        rxn  l1, 8
+        lr   r4, l1, crc
+        rxn  l1, 8, c
+        shli r1, r3, 1                      ; byte count
+rx_fin: stat r3, l1                         ; bit count of the cut-short word in [15:11]; stop keeps it
         shri r3, r3, 11
         shli r2, r1, 4
         or   r3, r3, r2                     ; byte count in [7:4]

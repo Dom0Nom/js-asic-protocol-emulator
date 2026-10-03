@@ -172,7 +172,7 @@ class UsbLsReceiver:
     own clock_hz/1.5e6 nominal bit period.
     """
 
-    def __init__(self, dp, dm, clock_hz=50e6):
+    def __init__(self, dp, dm, clock_hz=25e6):
         self.dp = dp
         self.dm = dm
         self.cycles_per_bit = clock_hz / 1.5e6
@@ -344,7 +344,7 @@ class UsbLsTransmitter:
     edge of the low-speed +/-1.5% tolerance (USB 2.0 spec 7.1.11).
     """
 
-    def __init__(self, dp, dm, clock_hz=50e6, bit_rate_error=0.0):
+    def __init__(self, dp, dm, clock_hz=25e6, bit_rate_error=0.0):
         self.dp = dp
         self.dm = dm
         self.cycles_per_bit = clock_hz / (1.5e6 * (1 + bit_rate_error))
