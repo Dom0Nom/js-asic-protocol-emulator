@@ -1,0 +1,29 @@
+[tasks]
+kind
+pdr
+
+[options]
+mode prove
+kind: depth 24
+multiclock off
+
+[engines]
+kind: smtbmc bitwuzla
+pdr: abc pdr
+
+[script]
+read_verilog -formal -I../src tempo_lane.v
+read_verilog -formal -sv lane_miter.sv
+prep -top lane_miter
+pdr: flatten
+pdr: memory_map
+pdr: opt -full
+pdr: techmap
+pdr: opt -fast
+pdr: setundef -undriven -anyseq
+pdr: setundef -anyseq
+pdr: opt_clean
+
+[files]
+../src/tempo_lane.v
+lane_miter.sv
