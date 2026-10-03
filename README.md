@@ -9,7 +9,7 @@ one lite lane move pins on independent timelines. Firmware supplies words,
 symbols and deadlines; lanes handle sampling, clock pulses and line coding.
 This lets one instruction set implement UART, SPI, I2C, JTAG, SWD, passive
 monitoring and edge capture. NRZI, stuffing and CRC are reusable settings;
-USB low-speed PHY tests exist, but USB enumeration is unfinished.
+A USB low-speed packet PHY passes in RTL lockstep at the declared 25 MHz; USB enumeration and pad-level behaviour are untested.
 
 The verification compares every RTL pad and instruction commit with a Python
 cycle model. Independent target models check the protocols on the wire.
