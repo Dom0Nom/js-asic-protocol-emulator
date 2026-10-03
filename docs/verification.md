@@ -90,7 +90,7 @@ listed under [Not done yet](#not-done-yet).
 Results:
 
 - `core.sby`, task `prove`: barrel isolation, mailbox bounds, valid simultaneous mailbox indices proven by k-induction (depth 8, bitwuzla), re-run PASS on 2026-09-30. The proof covers only these asserted core invariants, with lanes replaced by unconstrained stubs, so they hold for any lane behaviour. Task `bmc` (depth 30) passes but is vacuous over thread execution: threads cannot start before step 36 (bug 53).
-- `lane_miter.sv`: the last run found no counterexample through step 14 and timed out at step 15. The timing-independence theorem remains unproven; it is not a passing depth-60 result.
+- `lane_miter.sv`: the latest run (2026-10-03, 7,200 s) found no counterexample through step 15 and timed out at step 16. The timing-independence theorem remains unproven; it is not a passing depth-60 result.
 - `lane_anchor.sv` defines a separate short anchored-emit property and
   on-time/late cover goals. Its safety result is BMC depth 40 (bounded, not
   a proof); its five covers were reached by the solver on 2026-09-30.
@@ -119,7 +119,7 @@ Results:
   [SBY reference](https://symbiyosys.readthedocs.io/en/latest/reference.html#tasks-section).
   Solver witnesses for both miter covers were obtained on 2026-09-30 (see
   "Formal witnesses and nonvacuity, 2026-09-30" below). Safety remains
-  bounded at step 14.
+  bounded: no counterexample through step 15 (2026-10-03).
 
 Run with `sby -f formal/<job>.sby [task]` (SymbiYosys, `smtbmc bitwuzla`); `core_cover.sby` builds its instrumented core copy itself through `formal/core_nv_gen.sh`.
 
@@ -174,7 +174,7 @@ tracked files.
 |---|---|
 | RTL cocotb suite (`cd test && make -B`), 27 cases | 27/27 PASS, 2,645 s (Icarus 14.0 on the Linux build machine; the same suite passed 27/27 on macOS at `d792435`, same RTL and tests) |
 | Constrained-random lockstep, 100 seeds x 3000 cycles | PASS, 22,539 commits matched RTL against the model, 507 s |
-| Python model, assembler, host and benchmark tests | 194 passed, 8 skipped (the MicroPython-port tests; that machine has no `micropython`), 975 s; the export check below runs all 202 including those 8 |
+| Python model, assembler, host and benchmark tests | 194 passed, 8 skipped (the MicroPython-port tests; that machine has no `micropython`), 975 s. A clean clone of the source export (which leaves out the 6 export-tool tests) passes all 196 of its tests on macOS, the MicroPython ones included, plus the UART, SPI and I2C cocotb smoke cases |
 | Gate level, routed `nl.v` of the harden, zero delay | 10/10 PASS: `test_host_boot_and_uart_tx`, `test_uart_rx_fast_sender`, `test_uc1_uart_autobaud_console`, `test_spi_mode3_flash_read`, `test_spi_mode0_jedec`, `test_uc3_spi_flash_programmer`, `test_i2c_write_read_with_stretching`, `test_uc2_i2c_bringup`, `test_demo_resident_multibus_with_busy_host_and_memory`, `test_demo_manchester_frame_scheduled_across_counter_wrap` |
 | Gate level with SDF, 40 ns clock | `test_host_boot_and_uart_tx`, `test_spi_mode3_flash_read`, `test_i2c_write_read_with_stretching`: 3/3 PASS at the slow corner (1.08 V, 125 C) and 3/3 PASS at the fast corner (1.32 V, -40 C); 27,571 of 27,572 SDF cell entries annotated (SRAM macro dropped) |
 | `core.sby` `prove` (k-induction, depth 8) | PASS, 5 s: barrel isolation and mailbox bounds, unbounded |
@@ -182,8 +182,8 @@ tracked files.
 | `core_cover.sby` `cover` and `cover_host` | PASS, 800 s: 5 of 5 thread covers (steps 36-39); PASS, 2,919 s: 4 of 4 host covers (steps 48, 66, 81, 82) |
 | `lane_anchor.sby` `bmc` (depth 40) and `cover` | PASS, 341 s; PASS, 5 of 5 covers |
 | `lane_miter.sby` `cover` and `cover_hint` | PASS, both covers; PASS, both covers |
-| `lane_miter.sby` `bmc` (depth 60) | MITERBMC |
-| Lane miter, unbounded attempts | MITERPROVE |
+| `lane_miter.sby` `bmc` (depth 60) | No counterexample through step 15 (one step beyond the 2026-09-30 run); timed out at 7,200 s while checking step 16. Bounded, not a proof |
+| Lane miter, unbounded attempts | k-induction (depth 24) fails: the induction step finds an unreachable counterexample state, so the miter needs strengthening invariants. `abc pdr` (after `flatten; memory_map; setundef -anyseq`, which fixes the earlier "x or z bits" AIG export error, rc 16): no proof and no counterexample after 7,200 s, frame 9. The theorem remains unproven |
 
 Scope of the SDF runs: Icarus annotates every standard-cell and interconnect
 delay entry except the SRAM macro (dropped; its 7.1-7.3 ns read is covered by
