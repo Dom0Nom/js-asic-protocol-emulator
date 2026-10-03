@@ -144,6 +144,59 @@ call costs advance the live chip at its actual clock while preserving
 wire data. `tools/bench_rates.py` checks sustained SPI/UART transfers across
 host-cost scenarios; those are sensitivity predictions, not board timings.
 
+## Physical signoff
+
+Harden of `b4b9fe8` (chip sources identical to `835c1d1`; `final/commit_id.json` names `b4b9fe8`), 2026-10-01, Tiny Tapeout flow with tt-support-tools `d66cf17`, LibreLane 3.1.0.dev3 and IHP-Open-PDK `2bbec75`, 6x4 tiles, `CLOCK_PERIOD` 40 ns. All values from `final/metrics.csv` and the step reports of that run.
+
+| Check | Result |
+|---|---|
+| Setup, reg-to-reg worst slack | typ +16.89 ns, slow (1.08 V, 125 C) +3.09 ns, fast +24.78 ns; 0 violating paths at every corner |
+| Hold, worst slack | typ +0.28 ns, slow +0.58 ns, fast +0.083 ns; 0 violations |
+| Detailed-route DRC | 0 after 10 iterations |
+| KLayout DRC, LVS, antenna | 0, 0, 0 |
+| Power grid (VPWR / VGND, checked after the SRAM columns are connected) | 0 / 0 |
+| Illegal overlaps | 0 |
+| Lint errors, inferred latches | 0, 0 |
+| Tiny Tapeout precheck | 9 of 9 checks pass on the same GDS (sha256 `e25dd430...`) |
+| Max slew / max cap / max fanout | 121 slow, 37 typ, 0 fast / 13 per corner / 13 per corner |
+| Disconnected pins | 1, the unused `ena` input (0 critical) |
+
+The electrical items are open, not signed off. Slew and cap violators are 1x NAND/OAI drivers on wide select nets (worst 5.07 ns against the 2.51 ns library limit, so the delay calculator extrapolates past the table) and one SRAM data output; the fanout violators are the four top clock buffers (16 sinks each against a limit of 8) and nine data buffers (9 to 11). OpenSTA at the slow corner on the final netlist and extracted parasitics finds that every worst setup and hold path through any of the 135 violator pins keeps at least 1.42 ns of slack. The SDF gate-level runs below use the same delays. Post-route design repair, which targets these, hung in an earlier harden and is disabled.
+
+## Current evidence at the harden commit
+
+Every run below used the exact source of the harden commit `b4b9fe8` (or
+`835c1d1`, whose `src/`, `test/`, `tools/`, `fw/` and `formal/` are identical
+to it); each log's first line names its commit and reports zero modified
+tracked files.
+
+| Check | Result |
+|---|---|
+| RTL cocotb suite (`cd test && make -B`), 27 cases | 27/27 PASS, 2,645 s (Icarus 14.0 on the Linux build machine; the same suite passed 27/27 on macOS at `d792435`, same RTL and tests) |
+| Constrained-random lockstep, 100 seeds x 3000 cycles | PASS, 22,539 commits matched RTL against the model, 507 s |
+| Python model, assembler, host and benchmark tests | 194 passed, 8 skipped (the MicroPython-port tests; that machine has no `micropython`), 975 s; the export check below runs all 202 including those 8 |
+| Gate level, routed `nl.v` of the harden, zero delay | 10/10 PASS: `test_host_boot_and_uart_tx`, `test_uart_rx_fast_sender`, `test_uc1_uart_autobaud_console`, `test_spi_mode3_flash_read`, `test_spi_mode0_jedec`, `test_uc3_spi_flash_programmer`, `test_i2c_write_read_with_stretching`, `test_uc2_i2c_bringup`, `test_demo_resident_multibus_with_busy_host_and_memory`, `test_demo_manchester_frame_scheduled_across_counter_wrap` |
+| Gate level with SDF, 40 ns clock | `test_host_boot_and_uart_tx`, `test_spi_mode3_flash_read`, `test_i2c_write_read_with_stretching`: 3/3 PASS at the slow corner (1.08 V, 125 C) and 3/3 PASS at the fast corner (1.32 V, -40 C); 27,571 of 27,572 SDF cell entries annotated (SRAM macro dropped) |
+| `core.sby` `prove` (k-induction, depth 8) | PASS, 5 s: barrel isolation and mailbox bounds, unbounded |
+| `core.sby` `bmc` (depth 30) and `bmc_deep` (depth 50) | PASS, 61 s and 311 s; depth 30 is vacuous for thread execution (bug 53), depth 50 bounds about 14 cycles of execution |
+| `core_cover.sby` `cover` and `cover_host` | PASS, 800 s: 5 of 5 thread covers (steps 36-39); PASS, 2,919 s: 4 of 4 host covers (steps 48, 66, 81, 82) |
+| `lane_anchor.sby` `bmc` (depth 40) and `cover` | PASS, 341 s; PASS, 5 of 5 covers |
+| `lane_miter.sby` `cover` and `cover_hint` | PASS, both covers; PASS, both covers |
+| `lane_miter.sby` `bmc` (depth 60) | MITERBMC |
+| Lane miter, unbounded attempts | MITERPROVE |
+
+Scope of the SDF runs: Icarus annotates every standard-cell and interconnect
+delay entry except the SRAM macro (dropped; its 7.1-7.3 ns read is covered by
+STA). It also prints 68 "sorry: ifnone with an edge-sensitive path is not
+supported" messages, for 17 multi-path cell types (`a221oi`, `a22oi`, `a21o`,
+`a21oi`, `o21ai`, `xor2`, `xnor2`, `mux2`, `mux4` and the scan flops): for
+those cells it skips the default (`ifnone`) arc, so an input change that
+matches none of the cell's conditional arcs propagates without that arc's
+delay. The plain reset flops (`dfrbp`) are not affected. Icarus also does not
+evaluate TIMINGCHECK entries. The SDF runs therefore show function at the
+annotated corner delays, partly optimistically; setup and hold signoff is
+static timing analysis.
+
 ## Bugs the method caught
 
 The project bug log holds 54 real defects in the model, RTL, firmware, host
@@ -175,8 +228,10 @@ Notable examples:
 
 ## Not done yet
 
-Full GDS signoff and gate-level simulation matching the final RTL/PDN, physical-board tests,
-USB enumeration, and completion of the lane timing-independence proof.
+Physical-board tests (no silicon or FPGA board run), USB enumeration (only the
+low-speed packet PHY is tested), an unbounded lane timing-independence proof
+(bounded BMC only), and the open electrical items in
+[Physical signoff](#physical-signoff).
 Random lockstep logs report retired-instruction and external-clock receive
 coverage; an absent instruction remains an explicit coverage gap.
 

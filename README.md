@@ -21,11 +21,16 @@ and remaining work.
 The declared clock is 25 MHz (40 ns; the RP2350 demo board makes it as
 150 MHz / 6). The previous routed design at 50 MHz missed slow-corner setup
 by 9.19 ns, so 50 MHz is a future target, not a claim. The routed 25 MHz
-build at `c3ffca5` (30,182 standard cells, 54% utilisation) meets setup at
-every corner (worst slow-corner slack +2.835 ns) with zero DRC, LVS, antenna
-and power-grid violations. Its Tiny Tapeout precheck failed the power-pin
-check (bug 54); the SRAM power plugin now leaves the cut columns out of
-the power port, and a new harden with that fix is pending.
+build at `b4b9fe8` (27,570 standard cells, 55% utilisation, 6x4 tiles) meets
+setup and hold at every corner (worst slow-corner setup slack +3.09 ns, hold
++0.083 ns fast) with zero DRC, LVS, antenna, power-grid and illegal-overlap
+violations, and passes all nine Tiny Tapeout precheck checks. Its routed
+netlist passes the UART, SPI, I2C and demo cases at gate level, and the
+UART/SPI/I2C cases with SDF back-annotation at the slow and fast corners.
+Open electrical items: 121 max-slew pins at the slow corner and 13 max-cap
+and 13 max-fanout pins; every timing path through them keeps at least 1.42 ns
+of slack in slow-corner STA (details in
+[verification](docs/verification.md#physical-signoff)).
 
 ## What it does differently
 
