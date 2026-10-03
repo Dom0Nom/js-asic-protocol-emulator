@@ -36,7 +36,7 @@ def request(apndp, rnw, addr):
 class Swd:
     def __init__(self, link, swdio=0, swclk=1, period=20, retries=20):
         """swdio, swclk: Tempo pin indices. period: cycles per bit
-        (SWCLK = 50 MHz / period)."""
+        (SWCLK = link.clock_hz / period)."""
         self.link = link
         self.retries = retries
         half = period // 2

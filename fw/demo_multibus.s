@@ -1,6 +1,8 @@
 ; One resident image: UART TX, Manchester TX, a memory workload and
 ; host-commanded I2C master. Pin assignments are disjoint, and only the
-; I2C service uses the mailboxes. Timing constants assume 50 MHz.
+; I2C service uses the mailboxes. Timing constants are fixed cycle counts:
+; UART 50 cycles/bit, Manchester 50 cycles/bit, I2C 125 cycles/bit, i.e.
+; 500 kbaud, 500 kbit/s and 200 kHz at the declared 25 MHz.
 ; T0/T1 initialize their lanes and halt; host resumes them at the K_ PCs.
 
         .equ I2C_SLOT, 125

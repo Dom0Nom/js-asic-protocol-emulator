@@ -61,17 +61,16 @@ The SPI monitor is also armed during a 150-transaction burst. Its constructor
 must preserve records read while waiting for readiness, every damaged record
 must be flagged, and an intact transaction must arrive after the backlog drains.
 
-The bug-fix source state at `376c03a` passes all 24 directed/use-case RTL tests,
-with no failures or skips and exit 0, on Linux (Icarus 14, cocotb 2.0.1,
-Python 3.12), 2026-09-26. All 73 simulation source hashes matched that
-checkout. Its complete Python suite also passes all 157 tests, including
-MicroPython replay and CLI sessions. These are simulation results; board
-verification and physical signoff remain pending. Current limitations are
-listed under [Not done yet](#not-done-yet).
+At the harden commit `b4b9fe8` the RTL suite passes 27/27 (2026-10-03) and
+the Python suite passes 194 with 8 MicroPython skips; a clean clone of the
+source export passes 196/196. See
+[Current evidence at the harden commit](#current-evidence-at-the-harden-commit).
+These are simulation results; board verification remains pending. Current
+limitations are listed under [Not done yet](#not-done-yet).
 
 ### 5. Constrained-random lockstep
 
-`tools/tempo/randprog.py` generates random four-thread programs (all instruction classes, random lane configurations, bounded waits, forward control flow) and `test/test_random.py` runs them in lockstep with random noise on the inputs; unused bidirectional pins loop the chip's outputs back into its inputs, so lane receive paths see real traffic. On the final retained RTL, 2026-09-26: 100 seeds, 300,000 cycles, 22,539 commits compared, no divergence, and 3,377 external-clock receive samples. Every instruction name has nonzero retired coverage; rare blocking instructions remain sparsely covered (`wev`: 1, `hget`: 5). The random run is repeated after every RTL change.
+`tools/tempo/randprog.py` generates random four-thread programs (all instruction classes, random lane configurations, bounded waits, forward control flow) and `test/test_random.py` runs them in lockstep with random noise on the inputs; unused bidirectional pins loop the chip's outputs back into its inputs, so lane receive paths see real traffic. At the harden commit `b4b9fe8`: 100 seeds x 3000 cycles, 22,539 commits compared, no divergence. (An earlier run, 2026-09-26, also recorded 3,377 external-clock receive samples.) Every instruction name has nonzero retired coverage; rare blocking instructions remain sparsely covered (`wev`: 1, `hget`: 5). The random run is repeated after every RTL change.
 
 ### 6. Formal proofs (SymbiYosys)
 
@@ -89,11 +88,11 @@ listed under [Not done yet](#not-done-yet).
 
 Results:
 
-- `core.sby`, task `prove`: barrel isolation, mailbox bounds, valid simultaneous mailbox indices proven by k-induction (depth 8, bitwuzla), re-run PASS on 2026-09-30. The proof covers only these asserted core invariants, with lanes replaced by unconstrained stubs, so they hold for any lane behaviour. Task `bmc` (depth 30) passes but is vacuous over thread execution: threads cannot start before step 36 (bug 53).
+- `core.sby`, task `prove`: barrel isolation, mailbox bounds, valid simultaneous mailbox indices proven by k-induction (depth 8, bitwuzla), PASS at the harden commit `b4b9fe8` (2026-10-03). The proof covers only these asserted core invariants, with lanes replaced by unconstrained stubs, so they hold for any lane behaviour. Task `bmc` (depth 30) passes but is vacuous over thread execution: threads cannot start before step 36 (bug 53).
 - `lane_miter.sv`: the latest run (2026-10-03, 7,200 s) found no counterexample through step 15 and timed out at step 16. The timing-independence theorem remains unproven; it is not a passing depth-60 result.
 - `lane_anchor.sv` defines a separate short anchored-emit property and
   on-time/late cover goals. Its safety result is BMC depth 40 (bounded, not
-  a proof); its five covers were reached by the solver on 2026-09-30.
+  a proof); BMC and its five covers PASS at the harden commit `b4b9fe8`.
   The miter now declares completion goals requiring
   both full tapes to finish, at least one TX, enabled-high lane output and
   no LATE/UNDER. The stronger goal requires a TX/LW/TX payload, distinct
@@ -117,8 +116,9 @@ Results:
   the pinned SBY parser confirms both task selections.
   Task-tag behavior is described in the
   [SBY reference](https://symbiyosys.readthedocs.io/en/latest/reference.html#tasks-section).
-  Solver witnesses for both miter covers were obtained on 2026-09-30 (see
-  "Formal witnesses and nonvacuity, 2026-09-30" below). Safety remains
+  Solver witnesses for both miter covers (`cover`, `cover_hint`) PASS at the
+  harden commit `b4b9fe8`; see also the history in "Formal witnesses and
+  nonvacuity, 2026-09-30" below. Safety remains
   bounded: no counterexample through step 15 (2026-10-03).
 
 Run with `sby -f formal/<job>.sby [task]` (SymbiYosys, `smtbmc bitwuzla`); `core_cover.sby` builds its instrumented core copy itself through `formal/core_nv_gen.sh`.
@@ -163,6 +163,8 @@ Harden of `b4b9fe8` (chip sources identical to `835c1d1`; `final/commit_id.json`
 
 The electrical items are open, not signed off. Slew and cap violators are 1x NAND/OAI drivers on wide select nets (worst 5.07 ns against the 2.51 ns library limit, so the delay calculator extrapolates past the table) and one SRAM data output; the fanout violators are the four top clock buffers (16 sinks each against a limit of 8) and nine data buffers (9 to 11). OpenSTA at the slow corner on the final netlist and extracted parasitics finds that every worst setup and hold path through any of the 135 violator pins keeps at least 1.42 ns of slack. The SDF gate-level runs below use the same delays. Post-route design repair, which targets these, hung in an earlier harden and is disabled.
 
+The PSM-0069 lines in the harden's `error.log` come from `OpenROAD.GeneratePDN`, which runs before `Project.ExtendPowerStripes` connects the SRAM power columns; the post-connection check reports 0 VPWR/VGND violations and the final IR-drop step reports all VPWR/VGND shapes connected.
+
 ## Current evidence at the harden commit
 
 Every run below used the exact source of the harden commit `b4b9fe8` (or
@@ -183,7 +185,7 @@ tracked files.
 | `lane_anchor.sby` `bmc` (depth 40) and `cover` | PASS, 341 s; PASS, 5 of 5 covers |
 | `lane_miter.sby` `cover` and `cover_hint` | PASS, both covers; PASS, both covers |
 | `lane_miter.sby` `bmc` (depth 60) | No counterexample through step 15 (one step beyond the 2026-09-30 run); timed out at 7,200 s while checking step 16. Bounded, not a proof |
-| Lane miter, unbounded attempts | k-induction (depth 24) fails: the induction step finds an unreachable counterexample state, so the miter needs strengthening invariants. `abc pdr` (after `flatten; memory_map; setundef -anyseq`, which fixes the earlier "x or z bits" AIG export error, rc 16): no proof and no counterexample after 7,200 s, frame 9. The theorem remains unproven |
+| Lane miter, unbounded attempts (`formal/lane_miter_prove.sby`, tasks `kind`, `pdr`) | k-induction (depth 24) fails: the induction step finds an unreachable counterexample state, so the miter needs strengthening invariants. `abc pdr` (after `flatten; memory_map; setundef -anyseq`, which fixes the earlier "x or z bits" AIG export error, rc 16): no proof and no counterexample after 7,200 s, frame 9. The theorem remains unproven |
 
 Scope of the SDF runs: Icarus annotates every standard-cell and interconnect
 delay entry except the SRAM macro (dropped; its 7.1-7.3 ns read is covered by
@@ -250,6 +252,8 @@ timing-independence theorem.
 
 ## Blocking-instruction coverage, 2026-09-30
 
+*History: run before the `b4b9fe8` harden and not part of the runs in [Current evidence at the harden commit](#current-evidence-at-the-harden-commit).*
+
 The plain random generator only emits `wev`, `hget` and `rx` behind a
 `wany` guard, so they retire only when their source is already ready. A
 model-only replay of the recorded 100-seed configuration
@@ -302,11 +306,15 @@ The module is not in the default `COCOTB_TEST_MODULES`.
 
 ## Random lockstep and gate-level runs, 2026-09-30
 
-Plain random lockstep on the harden commit's RTL (`c3ffca5`, `src/` unchanged since): 100 seeds x 3000 cycles, 22,539 commits matched between RTL and the Python model, pass (781 s).
+*History: superseded by [Current evidence at the harden commit](#current-evidence-at-the-harden-commit).*
+
+Plain random lockstep on the RTL of the earlier `c3ffca5` harden: 100 seeds x 3000 cycles, 22,539 commits matched between RTL and the Python model, pass (781 s).
 
 Gate-level simulation had never run: `test/Makefile` left out the IHP primitive library (bug 52). With that fixed, `tools/gl_run.sh <netlist> <tag> "<tests>"` runs named cocotb cases against a netlist in a scratch copy of `test/` (`GATES=yes`, `NODUMP=yes`), with the functional SRAM model. Against a yosys netlist mapped to the IHP typ library (sha256 `06ef5ee7...`, 24,149 cell instances, pre-placement, zero-delay), all eight UART/SPI/I2C cases pass: `test_host_boot_and_uart_tx`, `test_uart_rx_fast_sender`, `test_spi_mode3_flash_read`, `test_spi_mode0_jedec`, `test_i2c_write_read_with_stretching`, `test_uc2_i2c_bringup`, `test_uc3_spi_flash_programmer`, `test_uc1_uart_autobaud_console`. This checks that synthesis preserves function; it is not the post-route netlist and carries no timing. The post-route result is recorded below when the harden completes.
 
 ## Formal witnesses and nonvacuity, 2026-09-30
+
+*History: superseded by [Current evidence at the harden commit](#current-evidence-at-the-harden-commit).*
 
 All jobs: SymbiYosys, engine `smtbmc bitwuzla`, run with a 900 s
 timeout, one at a time. Every job here
@@ -341,8 +349,9 @@ What each covers:
   the one in `formal/check_miter_trace.py` (define `MITER_HINT`, push times
   and pins free) and reaches both covers at step 38 with a solver-chosen
   schedule where copy B pushes ahead of A. The miter's safety result is
-  unchanged: BMC, no counterexample through step 14, timeout at step 15. It
-  is not a proof, and it still covers only the constrained tape family.
+  unchanged at the time: BMC, no counterexample through step 14, timeout at
+  step 15 (now through step 15, timeout at step 16; see section 6). It is
+  not a proof, and it still covers only the constrained tape family.
 - Lane anchor: the two existing covers (on time, late) plus three new ones:
   the emit is queued and pending while `now < T` without the level on D
   (the "never early" assert is exercised with the level pending), the
@@ -387,6 +396,8 @@ Gate-level lockstep scope (`test/lockstep.py`): in gate-level runs the internal 
 
 ### Gate level on the routed netlist, 2026-09-30
 
+*History: superseded by [Current evidence at the harden commit](#current-evidence-at-the-harden-commit).*
+
 Netlist: `final/nl/tt_um_dom0nom_protoemu.nl.v` from the `c3ffca5` harden (`final/commit_id.json` names `c3ffca5`; sha256 `4a099941...`, 76,376 cell instances including fill). All ten cases pass, zero-delay, with the per-cycle pad comparison against the Python model and the independent wire models:
 
 | Case | Protocol | Wall time |
@@ -402,6 +413,6 @@ Netlist: `final/nl/tt_um_dom0nom_protoemu.nl.v` from the `c3ffca5` harden (`fina
 | `test_demo_resident_multibus_with_busy_host_and_memory` | UART + Manchester + I2C + compute in one image | 681 s |
 | `test_demo_manchester_frame_scheduled_across_counter_wrap` | Manchester line code from firmware | 189 s |
 
-Timing-annotated gate level (same `c3ffca5` netlist): `SDF=<corner sdf> TEMPO_CLK_NS=40 tools/gl_run.sh ...` compiles with `-gspecify -ginterconnect`, back-annotates the LibreLane SDF (all 27,245 standard-cell and interconnect entries; the SRAM macro entry is dropped because Icarus cannot parse its bus-indexed IOPATHs and its behavioral model has no specify block, so the 7.1-7.3 ns SRAM read delay is covered by STA only) and runs at the declared 40 ns period. `test_host_boot_and_uart_tx`, `test_spi_mode3_flash_read` and `test_i2c_write_read_with_stretching` pass at the slow (1.08 V, 125 C) and fast (1.32 V, -40 C) corners; the only SDF messages are "Chosen value not defined" for the header VOLTAGE/TEMPERATURE triples. Icarus does not evaluate TIMINGCHECK entries, so setup/hold are checked by STA, not by this simulation.
+Timing-annotated gate level (same `c3ffca5` netlist): `SDF=<corner sdf> TEMPO_CLK_NS=40 tools/gl_run.sh ...` compiles with `-gspecify -ginterconnect`, back-annotates the LibreLane SDF (all 27,245 standard-cell and interconnect entries; the SRAM macro entry is dropped because Icarus cannot parse its bus-indexed IOPATHs and its behavioral model has no specify block, so the 7.1-7.3 ns SRAM read delay is covered by STA only) and runs at the declared 40 ns period. `test_host_boot_and_uart_tx`, `test_spi_mode3_flash_read` and `test_i2c_write_read_with_stretching` pass at the slow (1.08 V, 125 C) and fast (1.32 V, -40 C) corners; Icarus prints 68 "sorry: ifnone with an edge-sensitive path is not supported" messages (see "Current evidence at the harden commit" for what they skip), "TIMINGCHECK not supported", and "Chosen value not defined" for the header VOLTAGE/TEMPERATURE triples. Icarus does not evaluate TIMINGCHECK entries, so setup/hold are checked by STA, not by this simulation.
 
 Final committed-tree reruns: from a clean worktree at `d792435` (after the gate-level, SDF and clock-knob test changes), RTL 27/27 and Python 193/193; later commits change only docs.

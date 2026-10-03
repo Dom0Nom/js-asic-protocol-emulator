@@ -5,8 +5,8 @@ optional trigger, time reconstruction, measurements and VCD export.
 Runs the "la" firmware image (fw/la.s). Timestamps come from the lanes'
 capture mode: every edge of a pin (after the two-flop synchroniser and the
 optional glitch filter) is stamped with the cycle it was seen, so edges are
-placed to one clock cycle (20 ns at 50 MHz). All channels share that
-delay, so intervals between edges are exact to +-1 cycle (the asynchronous
+placed to one clock cycle (40 ns at the declared 25 MHz). All channels
+share that delay, so intervals between edges are exact to +-1 cycle (the asynchronous
 input is sampled on a clock edge).
 """
 

@@ -1,4 +1,5 @@
-; Firmware-defined Manchester, 1 Mbit/s at a 50 MHz core clock.
+; Firmware-defined Manchester, 50 cycles per bit (500 kbit/s at the
+; declared 25 MHz core clock).
 ; 0 = low/high, 1 = high/low, MSB first, split at 25 of 50 cycles.
 ; This is a line-code demonstration, not an Ethernet or USB PHY.
 ; T1 initializes lane 1 on uio1 and halts. Resume at mc_run to send

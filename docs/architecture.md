@@ -92,7 +92,7 @@ Software edges can only move on the thread's issue slot (every 4 cycles), so the
 
 This does not make Tempo faster than a PRU: at 200 MHz a PRU core issues 32 times the instructions of one Tempo thread (25 MHz / 4) and places edges on a 5 ns grid. The measured benefit is instruction cost per byte, edge accuracy that does not depend on the software schedule, and concurrency on one thread. The software loop is hand-written and not proven optimal, and no pad timing is modeled. Reproduce: `python tools/bench_swlane.py --rtl` (about 2 min; without `--rtl`, model only).
 
-Cycle-level behavior asserted by tests (RTL suite in `test/`, 27/27 pass on 2026-09-30):
+Cycle-level behavior asserted by tests (RTL suite in `test/`, 27/27 pass on 2026-10-03 at the harden commit `b4b9fe8`):
 
 - `test_demo_resident_multibus_with_busy_host_and_memory`: consecutive UART frames start exactly 500 cycles apart, every Manchester frame matches over all 1600 cycles, and a UART frame, a Manchester payload and a 300-cycle target stretch of SCL overlap inside one I2C write, while T2's scratch counter and SRAM constant read are checked.
 - `test_demo_manchester_frame_scheduled_across_counter_wrap`: a frame scheduled with `start` begins 2 cycles after its deadline at both tested phases, including a frame that straddles the 16-bit counter wrap and a deadline that wraps itself.
@@ -104,7 +104,7 @@ Cycle-level behavior asserted by tests (RTL suite in `test/`, 27/27 pass on 2026
 Direct bit-banging stays first class. A thread can move any lane pin with cycle-exact timing using `start` (schedule) plus `emit` (raw levels), without any line coding. Protocols with no use for the coding pipeline, such as PS/2 or custom sensor buses, are written this way.
 
 - Program loading: host SPI port on 4 pins (`ui[7:5]`, `uo[3]`) writes the instruction SRAM, sets thread PCs, starts, stops and single-steps threads, reads registers of halted threads, and exchanges words with firmware through mailbox FIFOs while threads run.
-- Size: the early 12.5k-cell estimate understated the implemented design. The current implementation has two full lanes and one lite lane; the routed 25 MHz build has 30,182 standard cells at 54% utilisation of the 6x4 tiles; the README gives its timing and signoff status. Use those measured results when evaluating fit and headroom.
+- Size: the early 12.5k-cell estimate understated the implemented design. The current implementation has two full lanes and one lite lane; the routed 25 MHz build (harden of `b4b9fe8`) has 27,570 standard cells at 55% utilisation of the 6x4 tiles; the README gives its timing and signoff status. Use those measured results when evaluating fit and headroom.
 
 ## Firmware sketches
 

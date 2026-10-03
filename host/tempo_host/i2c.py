@@ -12,7 +12,8 @@ from .link import TempoError
 START, STOP, WRITE, READ_ACK, READ_NACK, PROBE, RECOVER = 1, 2, 3, 4, 5, 6, 7
 NOPIN = 15
 
-# name: (bit slot in cycles at 50 MHz, SCL rises at, SCL falls at)
+# name: bit slot in cycles at a 50 MHz reference clock; I2c scales it to
+# link.clock_hz (125 -> 63 cycles, about 397 kHz, at 25 MHz)
 MODES = {
     "sm": 500,    # 100 kHz
     "fm": 125,    # 400 kHz
@@ -40,7 +41,7 @@ class I2c:
         """sda, scl: Tempo pin indices (0-7 = uio0-7). mode: sm, fm, fmp;
         slot overrides the bit time in clock cycles."""
         self.link = link
-        # MODES are cycles at 50 MHz; scale up (never down) for other clocks
+        # round up so the bus never runs faster than the mode's nominal rate
         s, cr, cf, samp = timing(slot or -(-MODES[mode] * link.clock_hz // 50000000))
         self.slot = s
         link.load(IMAGES["i2c"], {

@@ -28,7 +28,7 @@ def _val(bits):
 class Jtag:
     def __init__(self, link, tck=0, tms=1, tdi=2, tdo=3, period=20):
         """Pins are Tempo pin indices; tdi may be None (left undriven, for
-        pin finding). period: cycles per TCK (TCK = 50 MHz / period)."""
+        pin finding). period: cycles per TCK (TCK = link.clock_hz / period)."""
         self.link = link
         self.period = period
         self.load(tck, tms, tdi, tdo)

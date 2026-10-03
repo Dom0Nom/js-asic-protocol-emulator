@@ -5,7 +5,7 @@ The chip never drives a monitored pin. The I2C and SPI monitors use the
 lanes' external-clock receive mode (bits sampled on the bus's own clock
 edges); the UART monitor uses two ordinary receive lanes. Records arrive
 through an SRAM ring in the chip and are decoded here. Times are in clock
-cycles (20 ns at 50 MHz) from the first timed record.
+cycles (40 ns at the declared 25 MHz) from the first timed record.
 """
 
 from .images import IMAGES

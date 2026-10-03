@@ -5,8 +5,8 @@ trigger seen on another (a UART byte, or the Nth edge).
 Runs the "trigger" firmware image (fw/trigger.s). The pulse edges are
 anchored to the trigger edge's cycle (the lane's CAP or capture timestamp),
 so the delay is exact to the clock cycle; the only uncertainty is the
-+-1 cycle of sampling the asynchronous trigger input (20 ns at 50 MHz).
-A delay too short for the firmware to schedule (for a UART trigger, less
++-1 cycle of sampling the asynchronous trigger input (40 ns at the
+declared 25 MHz). A delay too short for the firmware to schedule (for a UART trigger, less
 than the byte's own length plus about 100 cycles) raises LATE on lane 0,
 which link.check() reports.
 """

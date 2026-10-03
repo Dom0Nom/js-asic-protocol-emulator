@@ -1,4 +1,4 @@
-<!-- Datasheet for Tiny Tapeout. Physical timing closure remains in progress. -->
+<!-- Datasheet for Tiny Tapeout. Timing is met at the declared 25 MHz (harden of b4b9fe8); 50 MHz is a future target. -->
 
 ## How it works
 
