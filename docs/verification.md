@@ -157,11 +157,11 @@ Harden of `b4b9fe8` (chip sources identical to `835c1d1`; `final/commit_id.json`
 | Power grid (VPWR / VGND, checked after the SRAM columns are connected) | 0 / 0 |
 | Illegal overlaps | 0 |
 | Lint errors, inferred latches | 0, 0 |
-| Tiny Tapeout precheck | 9 of 9 checks pass on the same GDS (sha256 `e25dd430...`) |
+| Tiny Tapeout precheck | 9 of 9 checks pass; the precheck log prints its input GDS hash (sha256 `e25dd430...`) and the harden commit `b4b9fe8` from `final/commit_id.json` |
 | Max slew / max cap / max fanout | 121 slow, 37 typ, 0 fast / 13 per corner / 13 per corner |
 | Disconnected pins | 1, the unused `ena` input (0 critical) |
 
-The electrical items are open, not signed off. Slew and cap violators are 1x NAND/OAI drivers on wide select nets (worst 5.07 ns against the 2.51 ns library limit, so the delay calculator extrapolates past the table) and one SRAM data output; the fanout violators are the four top clock buffers (16 sinks each against a limit of 8) and nine data buffers (9 to 11). OpenSTA at the slow corner on the final netlist and extracted parasitics finds that every worst setup and hold path through any of the 135 violator pins keeps at least 1.42 ns of slack. The SDF gate-level runs below use the same delays. Post-route design repair, which targets these, hung in an earlier harden and is disabled.
+The electrical items are open, not signed off. Slew and cap violators are 1x NAND/OAI drivers on wide select nets (worst 5.07 ns against the 2.51 ns library limit, so the delay calculator extrapolates past the table) and one SRAM data output; the fanout violators are the four top clock buffers (16 sinks each against a limit of 8) and nine data buffers (9 to 11). OpenSTA at the slow corner on the final netlist and extracted parasitics finds that every worst setup and hold path through any of the 135 violator pins keeps at least 1.42 ns of slack (`report_checks -through` style query with `find_timing_paths`, worst max and min path per pin, 270 paths). The SDF gate-level runs below use the same delays. Post-route design repair, which targets these, hung in an earlier harden and is disabled.
 
 The PSM-0069 lines in the harden's `error.log` come from `OpenROAD.GeneratePDN`, which runs before `Project.ExtendPowerStripes` connects the SRAM power columns; the post-connection check reports 0 VPWR/VGND violations and the final IR-drop step reports all VPWR/VGND shapes connected.
 
@@ -174,11 +174,12 @@ tracked files.
 
 | Check | Result |
 |---|---|
-| RTL cocotb suite (`cd test && make -B`), 27 cases | 27/27 PASS, 2,645 s (Icarus 14.0 on the Linux build machine; the same suite passed 27/27 on macOS at `d792435`, same RTL and tests) |
+| RTL cocotb suite (`cd test && make -B`), 27 cases | 27/27 PASS, 2,645 s (Icarus 14.0 on the Linux build machine; the same suite passed 27/27 on macOS at `d792435`, same RTL and tests); rerun at `14a3ff8` after the USB firmware and test change: 27/27 PASS, 2,575 s |
 | Constrained-random lockstep, 100 seeds x 3000 cycles | PASS, 22,539 commits matched RTL against the model, 507 s |
-| Python model, assembler, host and benchmark tests | 194 passed, 8 skipped (the MicroPython-port tests; that machine has no `micropython`), 975 s. A clean clone of the source export (which leaves out the 6 export-tool tests) passes all 196 of its tests on macOS, the MicroPython ones included, plus the UART, SPI and I2C cocotb smoke cases |
+| Python model, assembler, host and benchmark tests | 194 passed, 8 skipped (the MicroPython-port tests; that machine has no `micropython`), 975 s. A clean clone of the source export (which leaves out the 6 export-tool tests) passes all 196 of its tests on macOS, the MicroPython ones included, plus the UART, SPI and I2C cocotb smoke cases Rerun at `14a3ff8`: image check passes, 196 passed (two added USB clock cases), 8 MicroPython skips |
 | Gate level, routed `nl.v` of the harden, zero delay | 10/10 PASS: `test_host_boot_and_uart_tx`, `test_uart_rx_fast_sender`, `test_uc1_uart_autobaud_console`, `test_spi_mode3_flash_read`, `test_spi_mode0_jedec`, `test_uc3_spi_flash_programmer`, `test_i2c_write_read_with_stretching`, `test_uc2_i2c_bringup`, `test_demo_resident_multibus_with_busy_host_and_memory`, `test_demo_manchester_frame_scheduled_across_counter_wrap` |
 | Gate level with SDF, 40 ns clock | `test_host_boot_and_uart_tx`, `test_spi_mode3_flash_read`, `test_i2c_write_read_with_stretching`: 3/3 PASS at the slow corner (1.08 V, 125 C) and 3/3 PASS at the fast corner (1.32 V, -40 C); 27,571 of 27,572 SDF cell entries annotated (SRAM macro dropped) |
+| USB low-speed packet PHY at 25 MHz (`fw/usb_ls_phy.s`, `USB_CLK_KHZ=25000`, 16 + 171/256 cycles per bit) | Model tests and RTL lockstep `test_usb_ls_rx_and_tx` at `TEMPO_CLK_NS=40` pass: SYNC, NRZI, bit stuffing, CRC16 and EOP, packets back to back with a 1-bit gap at +-1.5% sender error. Firmware and tests changed after the harden (`260e432`); the chip RTL did not. Not run at gate level; no enumeration, no pad-level test |
 | `core.sby` `prove` (k-induction, depth 8) | PASS, 5 s: barrel isolation and mailbox bounds, unbounded |
 | `core.sby` `bmc` (depth 30) and `bmc_deep` (depth 50) | PASS, 61 s and 311 s; depth 30 is vacuous for thread execution (bug 53), depth 50 bounds about 14 cycles of execution |
 | `core_cover.sby` `cover` and `cover_host` | PASS, 800 s: 5 of 5 thread covers (steps 36-39); PASS, 2,919 s: 4 of 4 host covers (steps 48, 66, 81, 82) |
