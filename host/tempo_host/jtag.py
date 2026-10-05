@@ -3,7 +3,7 @@
 
 Runs the "jtag" firmware image (fw/jtag.s): lane 0 drives TCK and TDI and
 samples TDO, lane 1 drives TMS on the same timeline. The host tracks the
-TAP state; facts per IEEE 1149.1 as summarised in docs/specs.md section 4.
+TAP state; facts per IEEE 1149.1 (docs/architecture.md, Protocol reference).
 """
 
 from .images import IMAGES
@@ -42,7 +42,7 @@ class Jtag:
         if getattr(self, "pins", None) and self.link.image is IMAGES["jtag"]:
             self.link.patch(pins)  # re-pin without reloading the code
         else:
-            pins.update({"per": self.period, "cr": half, "cf": self.period, "samp": half})
+            pins.update({"per": self.period, "cr": half, "cf": self.period, "samp": half + 1})
             self.link.load(IMAGES["jtag"], pins)
         self.pins = (tck, tms, tdi, tdo)
         self.state = None
@@ -152,7 +152,7 @@ def find_pins(link, candidates=(0, 1, 2, 3, 4, 5, 6, 7), period=20, log=None):
     three. Then each remaining pin is tried as TDI: a pattern shifted in
     must come out of TDO after the 32 IDCODE bits. Only bidirectional pins
     (uio 0-7) make sense as candidates. Driving unknown pins can fight a
-    target output: use series resistors (docs/use-cases.md)."""
+    target output: use series resistors."""
     j = None
     found = None
     for tck in candidates:

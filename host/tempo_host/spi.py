@@ -2,8 +2,7 @@
 """SPI master and SPI NOR flash programmer.
 
 Runs the "spi" firmware image (fw/spi.s) on lane 2. Flash commands follow
-the JEDEC-style command set of parts like the W25Q128JV (docs/specs.md,
-section 3); SFDP parsing follows JESD216 as implemented in Linux
+the JEDEC-style command set of parts like the W25Q128JV; SFDP parsing follows JESD216 as implemented in Linux
 drivers/mtd/spi-nor/sfdp.c.
 """
 
@@ -45,7 +44,7 @@ class Spi:
     def __init__(self, link, mosi=0, miso=1, sck=2, cs=3, mode=0, period=8, sample=None,
                  msb_first=True):
         """Pins are Tempo pin indices (0-7 = uio0-7). period: clock cycles per
-        bit (SCK = clock / period), 5..8191 for modes 0/2, 6..8191 for
+        bit (SCK = clock / period), 6..8191 for modes 0/2, 7..8191 for
         modes 1/3. sample: cycle within the bit
         at which MISO is sampled, default period - 1 (latest point, the most
         margin for pad and target delays)."""
@@ -53,10 +52,10 @@ class Spi:
             raise ValueError("SPI mode must be 0..3")
         cpol, cpha = mode >> 1, mode & 1
         # Registered pads, target response and the two input synchroniser
-        # stages delay MISO. Modes 1/3 also shift on this slot's first edge.
+        # stages and the lane input register delay MISO. Modes 1/3 also shift on this slot's first edge.
         # These minima are checked against a target on the cycle-level board;
         # real pad/target delays can require a longer period.
-        earliest = 4 + cpha
+        earliest = 5 + cpha
         if not earliest + 1 <= period <= 8191:
             raise ValueError("period must be %d..8191 cycles for this mode" % (earliest + 1))
         sample = period - 1 if sample is None else sample
@@ -65,7 +64,9 @@ class Spi:
         self.link = link
         self.msb_first = msb_first
         half = period // 2
-        cr = half * (1 - cpha)
+        # CPHA 0: the shifting edge sits one cycle before the slot end, so
+        # MISO has a whole period to come back whether period is odd or even.
+        cr = 0 if cpha else period - 1 - half
         idle_c = E_C if cpol else 0
         cs_low = E_DEN | E_AEN | E_CEN | idle_c
         self.period = period

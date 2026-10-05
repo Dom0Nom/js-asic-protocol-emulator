@@ -33,7 +33,7 @@ def test_id_sfdp_read():
 
 
 def test_erase_program_verify_mode3():
-    h, f, fl = board(mode=3, period=6)
+    h, f, fl = board(mode=3, period=7)
     fl.erase_sector(0x2000)
     data = bytes((i * 7) & 0xFF for i in range(300))
     fl.program(0x20F0, data)  # crosses a page boundary: 16 + 256 + 28 bytes
@@ -53,7 +53,7 @@ def test_bulk_read_through_sram():
     assert not f.violations
 
 
-@pytest.mark.parametrize("mode,period", [(0, 4), (1, 4), (1, 5), (2, 4), (3, 5)])
+@pytest.mark.parametrize("mode,period", [(0, 5), (1, 5), (1, 6), (2, 5), (3, 6)])
 def test_reject_spi_period_that_samples_previous_bit(mode, period):
     h = Harness(None, boot="host")
     with pytest.raises(ValueError):
@@ -61,7 +61,7 @@ def test_reject_spi_period_that_samples_previous_bit(mode, period):
 
 
 @pytest.mark.parametrize("kw", [{"mode": -1}, {"mode": 4}, {"period": 8192},
-                                {"sample": -1}, {"sample": 3}, {"sample": 8}])
+                                {"sample": -1}, {"sample": 4}, {"sample": 8}])
 def test_reject_invalid_spi_timing_before_loading(kw):
     h = Harness(None, boot="host")
     link = Link(model_transport(h))
@@ -70,7 +70,7 @@ def test_reject_invalid_spi_timing_before_loading(kw):
     assert link.image is None
 
 
-@pytest.mark.parametrize("mode,period", [(0, 5), (1, 6), (2, 5), (3, 6),
+@pytest.mark.parametrize("mode,period", [(0, 6), (1, 7), (2, 6), (3, 7),
                                         (0, 7), (1, 7), (2, 8), (3, 8)])
 def test_full_duplex_at_minimum_period_in_every_mode(mode, period):
     h = Harness(None, boot="host", pullups={"uio3"})
@@ -128,7 +128,7 @@ def test_lsb_first_bulk_read_preserves_order_across_sram_halves():
     response = b"\x96\xa5\x3c\x69"
     slave = h.attach(SpiSlave("uio2", "uio0", "uio1", "uio3", mode=3,
                              msb_first=False, response=response))
-    spi = Spi(Link(model_transport(h)), mode=3, period=6, msb_first=False)
+    spi = Spi(Link(model_transport(h)), mode=3, period=7, msb_first=False)
     assert spi.read_bulk(1024) == response * 256
     spi.end()
     h.run(300)

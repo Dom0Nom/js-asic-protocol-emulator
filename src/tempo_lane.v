@@ -107,6 +107,7 @@ module tempo_lane #(
   reg [1:0]  d, a, c;       // {enable, level} as {[1], [0]}: [0] level, [1] enable
   reg [2:0]  owned;         // {c, a, d}
   reg [3:0]  filt;
+  reg [3:0]  in4;           // selected and filtered {A, C, I, D}, one cycle old
   reg [11:0] fcnt;
   reg [3:0]  prev4;
 
@@ -155,6 +156,7 @@ module tempo_lane #(
   reg [1:0]  d_n, a_n, c_n;
   reg [2:0]  owned_n;
   reg [3:0]  filt_n;
+  reg [3:0]  in4_n;
   reg [11:0] fcnt_n;
   reg [3:0]  prev4_n;
 
@@ -234,7 +236,7 @@ module tempo_lane #(
     line_n = line; last_bit_n = last_bit; stuff_pending_n = stuff_pending; run_n = run;
     rline_n = rline; rlast_n = rlast; destuff_n = destuff; rerr_n = rerr; rrun_n = rrun;
     rword_n = rword; rcount_n = rcount; prev_level_n = prev_level;
-    d_n = d; a_n = a; c_n = c; owned_n = owned; filt_n = filt; fcnt_n = fcnt; prev4_n = prev4;
+    d_n = d; a_n = a; c_n = c; owned_n = owned; filt_n = filt; fcnt_n = fcnt; prev4_n = prev4; in4_n = in4;
     set_start = 1'b0; set_stop = 1'b0; done = 1'b0; ended = 1'b0; rx_push = 1'b0;
     rxp_word = 16'd0; rxp_count = 5'd0; rxp_end = 1'b0; rxp_err = 1'b0;
     sym = 16'd0; diff = 16'd0; crc_tmp = 16'd0; w = 16'd0; k = 5'd0; off = 8'd0;
@@ -243,7 +245,7 @@ module tempo_lane #(
     fin = 1'b0; align_edge = 1'b0; sampled_end = 1'b0; want_cfg = 1'b0; want_try = 1'b0; start_cmd = 1'b0; start_auto = 1'b0;
     tx_slot = 1'b0; bslot = 1'b0; lv = 1'b0; bs_kind = SK_TX; bs_len = 16'd0;
     h_kind = 3'd0; h_data = 16'd0; h_n = 5'd0; h_flags = 3'd0; h_reg = 4'd0; h_v = 1'b0; h_is_cfg = 1'b0; h_is_data = 1'b0;
-    off = 8'd3 + {5'd0, mode[11:9]};
+    off = 8'd4 + {5'd0, mode[11:9]};
 
     // ---- stage 0: inputs, filter, patterns
     flt = mode[11:9];
@@ -254,7 +256,7 @@ module tempo_lane #(
         2: raw = in_pin(pins_in, pin_c(pins));
         default: raw = in_pin(pins_in, pin_a(pins));
       endcase
-      cur4[r] = (flt == 3'd0) ? raw : filt[r];
+      in4_n[r] = (flt == 3'd0) ? raw : filt[r];
       if (flt != 3'd0) begin
         if (raw == filt[r]) fcnt_n[r*3 +: 3] = 3'd0;
         else begin
@@ -266,6 +268,7 @@ module tempo_lane #(
         end
       end
     end
+    cur4 = in4;
     in_d = cur4[0]; in_i = cur4[1]; in_c = cur4[2]; in_a = cur4[3];
     pat8 = {prev4, cur4};
     prev_i = prev4[1];
@@ -661,7 +664,7 @@ module tempo_lane #(
       rx_complete <= 0;
       line <= 1; last_bit <= 0; stuff_pending <= 0; run <= 0;
       rline <= 1; rlast <= 0; destuff <= 0; rerr <= 0; rrun <= 0; rword <= 0; rcount <= 0; prev_level <= 0;
-      d <= 0; a <= 0; c <= 0; owned <= 0; filt <= 0; fcnt <= 0; prev4 <= 0;
+      d <= 0; a <= 0; c <= 0; owned <= 0; filt <= 0; fcnt <= 0; prev4 <= 0; in4 <= 0;
     end else begin
       cfg <= cfg_n; pins <= pins_n; len0 <= len0_n; len1 <= len1_n; sym0 <= sym0_n; sym1 <= sym1_n;
       frac <= frac_n; cr <= cr_n; cf <= cf_n; samp <= samp_n; pat <= pat_n; pate <= pate_n;
@@ -679,7 +682,7 @@ module tempo_lane #(
       line <= line_n; last_bit <= last_bit_n; stuff_pending <= stuff_pending_n; run <= run_n;
       rline <= rline_n; rlast <= rlast_n; destuff <= destuff_n; rerr <= rerr_n; rrun <= rrun_n;
       rword <= rword_n; rcount <= rcount_n; prev_level <= prev_level_n;
-      d <= d_n; a <= a_n; c <= c_n; owned <= owned_n; filt <= filt_n; fcnt <= fcnt_n; prev4 <= prev4_n;
+      d <= d_n; a <= a_n; c <= c_n; owned <= owned_n; filt <= filt_n; fcnt <= fcnt_n; prev4 <= prev4_n; in4 <= in4_n;
     end
   end
 

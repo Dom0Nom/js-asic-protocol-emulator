@@ -18,7 +18,7 @@ MASK16 = 0xFFFF
 NONE_PIN = 15
 QUEUE_DEPTH = 2
 RX_DEPTH = 2
-SYNC_LATENCY = 2  # two-flop input synchroniser
+SYNC_LATENCY = 3  # two-flop synchroniser plus the lane input register
 
 # Register indices
 (CFG, PINS, LEN0, LEN1, SYM0, SYM1, FRAC, CR, CF, SAMP, PAT, PATE,
@@ -104,6 +104,7 @@ class Lane:
         self.filt = [0, 0, 0, 0]  # filtered {D, I, C, A}
         self.fcnt = [0, 0, 0, 0]
         self.prev4 = 0
+        self.in4 = [0, 0, 0, 0]  # input register after select and filter
         self.frozen_done = False
         self.rx_complete = False
         self._m_start = 0
@@ -272,6 +273,7 @@ class Lane:
                     if self.fcnt[k] >= flt:
                         self.filt[k] = raw
                         self.fcnt[k] = 0
+        cur, self.in4 = self.in4, cur
         return cur
 
     def edge_offset_cycles(self):
