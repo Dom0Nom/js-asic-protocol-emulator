@@ -1,8 +1,7 @@
 """SPI slave models: full duplex, mode 0-3, with setup/hold/framing checks.
 
-Convention: CS is active low (asserted = 0), matching the vast majority of
-real SPI parts and the phrasing in the brief ("drives MISO, None when CS
-high").
+Convention: CS is active low (asserted = 0). MISO is driven only while CS
+is low.
 
 Mode -> (CPOL, CPHA):
   0 -> (0, 0)   1 -> (0, 1)   2 -> (1, 0)   3 -> (1, 1)

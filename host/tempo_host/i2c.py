@@ -13,7 +13,7 @@ START, STOP, WRITE, READ_ACK, READ_NACK, PROBE, RECOVER = 1, 2, 3, 4, 5, 6, 7
 NOPIN = 15
 
 # name: bit slot in cycles at a 50 MHz reference clock; I2c scales it to
-# link.clock_hz (125 -> 63 cycles, about 397 kHz, at 25 MHz)
+# link.clock_hz
 MODES = {
     "sm": 500,    # 100 kHz
     "fm": 125,    # 400 kHz

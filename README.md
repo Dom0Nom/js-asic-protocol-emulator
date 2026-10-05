@@ -49,6 +49,18 @@ Each row is firmware in [fw/](fw/) checked against a wire model written from
 the protocol specification ([tools/tempo/models/](tools/tempo/models/)).
 
 <!-- protocols:begin -->
+| Protocol | Firmware | Cycle model | RTL lockstep | Routed netlist |
+|---|---|---|---|---|
+| UART (any frame, fractional baud, autobaud) | `uart.s`, `autobaud.s` | yes | yes | {{GL}} |
+| SPI controller, modes 0-3 | `spi.s` | yes | yes | {{GL}} |
+| I2C controller with clock stretching | `i2c.s` | yes | yes | {{GL}} |
+| I2C target (24C02 EEPROM) | `i2ctarget.s` | yes | yes | no |
+| JTAG | `jtag.s` | yes | yes | no |
+| SWD | `swd.s` | yes | yes | no |
+| USB low-speed packets (NRZI, stuffing, CRC16) | `usb_ls_phy.s` | yes | yes | {{GL}} |
+| PS/2 device transmit and host receive | `ps2.s` | yes | yes | {{GL}} |
+| CAN 2.0A transmit (stuffing, CRC-15, arbitration) | `can_tx.s` | yes | yes | {{GL}} |
+| Manchester | `manchester.s` | yes | yes | {{GL}} |
 <!-- protocols:end -->
 
 `fw/demo_multibus.s` runs UART, Manchester and an I2C controller with clock

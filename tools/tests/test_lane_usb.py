@@ -1,5 +1,6 @@
 import pytest
 
+from tempo.clock import CLOCK_HZ
 from tempo.harness import Harness
 from tempo.models.usb_ls import UsbLsReceiver, UsbLsTransmitter
 
@@ -11,7 +12,7 @@ def pid_byte(name):
     return p | ((~p & 0xF) << 4)
 
 
-CLOCKS = [25e6, 50e6]  # declared clock first; 50 MHz shows the bit length follows USB_CLK_KHZ
+CLOCKS = [float(CLOCK_HZ), 50e6]  # the declared clock, and 50 MHz to show the bit length follows USB_CLK_KHZ
 
 
 def bits(clock_hz, n):

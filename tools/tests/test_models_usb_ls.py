@@ -39,7 +39,7 @@ def test_crc16_catalogue_check_value():
 
 
 def test_crc5_setup_addr0_ep0():
-    # Cited in the brief: a SETUP token to addr=0, ep=0 has CRC5 = 0x02.
+    # A SETUP token to addr=0, ep=0 has CRC5 = 0x02.
     # All 11 payload bits are 0 for that token, and this model's result
     # matches independently of the crc16 catalogue check above.
     assert crc5([0] * 11) == 0x02

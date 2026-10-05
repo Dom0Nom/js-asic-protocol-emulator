@@ -96,13 +96,13 @@ def test_spi_monitor_limits():
     link.check()
     # 6.25 MHz: the firmware falls behind, and the chip says so (UNDER). The
     # firmware reads and clears both lanes' STAT at CS rise and forwards the
-    # flags in the transaction's end record (bug 32), so that is where it shows.
+    # flags in the transaction's end record, so that is where it shows.
     got, mem, link = _spi_run(4, 256, 1)
     assert len(got) == 1 and got[0]["flags"] & 2 and got[0]["count"] < 260
 
 
 def test_spi_monitor_armed_mid_traffic():
-    # Bug 32: traffic already running while the firmware arms. A lane that
+    # Traffic already running while the firmware arms. A lane that
     # missed edges used to leave MISO paired one word off and then block the
     # monitor for good, with no flag. The traffic (20-cycle CS gaps) also
     # outruns the host link, so the chip's rings fill and events are
