@@ -5,6 +5,7 @@ import os
 from . import asm
 from .board import Board
 from .sim import Chip
+from .clock import CLOCK_HZ
 
 FW = os.path.join(os.path.dirname(__file__), "..", "..", "fw")
 
@@ -31,7 +32,7 @@ def net_of_input(i):
 
 
 class Harness:
-    def __init__(self, src, clock_hz=50e6, pullups=(), threads=None, chip=None, path=None,
+    def __init__(self, src, clock_hz=CLOCK_HZ, pullups=(), threads=None, chip=None, path=None,
                  boot="backdoor"):
         """boot: "backdoor" loads IMEM and starts threads directly; "host"
         loads and starts them through the host SPI port, like real silicon."""

@@ -7,6 +7,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from tempo.clock import CLOCK_HZ  # noqa: E402
 from tempo.harness import Harness  # noqa: E402
 from tempo.models.siggen import Pulses  # noqa: E402
 from tempo.models.uart import UartTx  # noqa: E402
@@ -42,10 +43,11 @@ def test_uart_byte_trigger_exact_delay():
     assert trig.wait(2, timeout_us=5000) == 2
     h.run(8000)
     starts = [c for c, v in tlog.edges]
-    # start bits of the two 0x42 bytes (bytes 1 and 3; 10 bits of 434 cycles each)
+    # start bits of the two 0x42 bytes (bytes 1 and 3)
+    bit = CLOCK_HZ / 115200
     frames = [c for c, v in tlog.edges if v == 0]
-    b1 = min(c for c in frames if c > frames[0] + 9 * 434)
-    b3 = min(c for c in frames if c > b1 + 2 * 9 * 434)
+    b1 = min(c for c in frames if c > frames[0] + 9 * bit)
+    b3 = min(c for c in frames if c > b1 + 2 * 9 * bit)
     pulses = [c for c, v in out.edges if v == 1]
     widths = [b - a for (a, va), (b, vb) in zip(out.edges, out.edges[1:]) if va == 1]
     offs = [p - b for p, b in zip(pulses, (b1, b3))]
@@ -78,14 +80,12 @@ def test_edge_count_trigger_and_late_flag():
         t2.wait(1, timeout_us=2000)
 
 
-@pytest.mark.parametrize("baud", [300, 2400, 9600])
+@pytest.mark.parametrize("baud", [300, 2400, 4800])
 def test_uart_trigger_rejects_frames_outside_timestamp_window(baud):
     h = Harness(None, boot="host", pullups={"uio1"})
     link = Link(model_transport(h))
-    # A prescaler alone cannot fix slow triggers: at 9600 baud the
-    # 16-bit CAP anchor made a requested 60000-cycle delay take 125540
-    # cycles (one whole wrap plus the normal 4-cycle pad pipeline).
-    # Reject before loading rather than promise an ambiguous anchor.
+    # A frame longer than the 16-bit CAP window would anchor the delay one
+    # counter wrap late, so the constructor rejects it before loading.
     with pytest.raises(ValueError, match="timestamp window"):
         PulseTrigger(link, baud=baud, match=0x42, delay=60000, width=100)
     assert h.board.cycle == 0

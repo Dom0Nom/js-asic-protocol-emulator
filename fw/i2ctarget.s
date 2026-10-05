@@ -8,7 +8,7 @@
 ;           (a repeated START cuts a word short).
 ;   lane 1: SCL only: start pattern SCL falling (the moment to change SDA).
 ;   lane 2: start pattern STOP.
-; Protocol per Microchip AT24C02C (docs/specs.md 2): device address
+; Protocol per Microchip AT24C02C: device address
 ; P_ADDR, a word address byte, page writes that roll over inside 8-byte
 ; pages, sequential reads that roll over at 256. No write-cycle busy time.
 ; P_STRETCH > 0 holds SCL low for that many cycles after every ACK the

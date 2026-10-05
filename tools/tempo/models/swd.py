@@ -1,7 +1,6 @@
 """SWD target model: an Arm SW-DP with one MEM-AP and a memory map.
 
-Wire behaviour per Arm ADIv5.2 (IHI 0031G) chapter B4, summarised in
-docs/specs.md section 5: the target samples SWDIO on the rising edge of
+Wire behaviour per Arm ADIv5.2 (IHI 0031G) chapter B4: the target samples SWDIO on the rising edge of
 SWCLK and changes (or releases) SWDIO on the rising edge. After the 8-bit
 request there is one turnaround cycle, then the target drives the 3-bit ACK
 (LSB first: OK 0b001, WAIT 0b010, FAULT 0b100). A read continues with 32

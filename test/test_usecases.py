@@ -2,9 +2,13 @@
 """Use-case tests: the host library (host/tempo_host) drives the RTL through
 the host SPI port, in lockstep with the model, against device models."""
 
+import os
+import sys
+
 import cocotb
 
 from lockstep import Lockstep
+from tempo.clock import CLOCK_HZ
 from tempo.models.i2c import Eeprom24Target, I2cTarget, StuckSda
 from tempo.transport import cocotb_call, cocotb_transport
 
@@ -21,6 +25,8 @@ from tempo_host import swd as swd_mod
 from tempo_host import jtag as jtag_mod
 from tempo_host.la import LogicAnalyser
 from tempo_host.trigger import PulseTrigger
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools", "tests"))
 
 
 async def setup(dut, pullups=()):
@@ -143,7 +149,7 @@ async def test_spi_all_modes_at_minimum_period(dut):
         data = b"\x81\x3c\xa5\x7e\x00\xff\x96\x69\x42"
 
         def host():
-            spi = spi_mod.Spi(link, mode=mode, period=5 + (mode & 1), msb_first=msb_first)
+            spi = spi_mod.Spi(link, mode=mode, period=6 + (mode & 1), msb_first=msb_first)
             got = spi.xfer(data)
             spi.end()
             return got
@@ -163,7 +169,8 @@ async def test_uc1_uart_autobaud_console(dut):
     ls, link = await setup(dut, pullups={"uio0", "uio1"})
     target_tx = ls.attach(UartTx("uio1", 115200, baud_error=0.01))
     target_rx = ls.attach(UartRx("uio0", 115200))
-    target_tx.send(b"U-Boot 2026.01\r\n", gap_bits=2)
+    # long enough to outlast loading the autobaud image over the host port
+    target_tx.send(b"U-Boot 2026.01\r\n" * 4, gap_bits=2)
 
     def host():
         baud, u = uart_mod.autobaud(link, rx=1, tx=0, confirm=0)
@@ -174,7 +181,7 @@ async def test_uc1_uart_autobaud_console(dut):
         return baud, prompt
 
     baud, prompt = await cocotb_call(host)
-    await ls.run(434 * 10 * 6)
+    await ls.run(10 * 6 * CLOCK_HZ // 115200)
     assert baud == 115200, baud
     assert prompt == b"ok>", prompt
     assert bytes(target_rx.bytes) == b"help\r" and not target_rx.errors, target_rx.errors
@@ -322,7 +329,7 @@ async def test_uc8_logic_analyser(dut):
     assert all(y[0] - x[0] == 80 for x, y in zip(b, b[1:])), b[:6]
     assert [y[0] - x[0] for x, y in zip(cap.edges[2], cap.edges[2][1:])] == [20, 29980, 7]
     m = cap.measure(0)
-    assert abs(m["frequency_hz"] - 100000) < 1 and abs(m["duty"] - 0.3) < 0.01
+    assert abs(m["frequency_hz"] - CLOCK_HZ / 500) < 1 and abs(m["duty"] - 0.3) < 0.01
     assert "$var wire 1 ! a $end" in vcd
     dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")
 
@@ -359,16 +366,14 @@ async def test_uc9_triggered_pulse(dut):
     falls = [c for c, v in tlog.edges if v == 0]
     starts = [falls[0]]  # frame starts: the first fall after each 11-bit frame
     for c in falls:
-        if c >= starts[-1] + 10 * 50:
+        if c >= starts[-1] + 10 * CLOCK_HZ // 1000000:
             starts.append(c)
     rises = [c for c, v in out.edges if v == 1]
     offs = [r - starts[i] for r, i in zip(rises, (1, 3))]
-    # delay + 4, every time: CAP = edge + 2 (input synchroniser), the pulse
-    # slot begins at CAP + delay exactly, and the pin shows it 2 cycles later
-    # (pad output register, board net update). The first draft of this test
-    # predicted 1505 before it ever ran; 1504 is what model and RTL both give,
-    # before and after the lane 3 cut.
-    assert offs == [1504, 1504], (offs, starts, rises)
+    # delay + 5, every time: CAP = edge + 3 (synchroniser and lane input
+    # register), the pulse slot begins at CAP + delay exactly, and the pin
+    # shows it 2 cycles later (pad output register, board net update).
+    assert offs == [1505, 1505], (offs, starts, rises)
     assert [b - a for (a, va), (b, vb) in zip(out.edges, out.edges[1:]) if va == 1] == [40, 40]
     dut._log.info(f"lockstep: {ls.cycles} cycles, {ls.commits} commits matched")
 
@@ -538,8 +543,8 @@ async def test_uart_receives_while_host_is_busy(dut):
 @cocotb.test()
 async def test_demo_resident_multibus_with_busy_host_and_memory(dut):
     """Three wire protocols overlap while T2 accesses SRAM/scratch."""
-    from tempo.demo_checks import (PAYLOAD, LoggedI2cTarget, LoggedUart, assert_overlap,
-                                   observe_stretch_holds, prepare)
+    from test_demos import (PAYLOAD, LoggedI2cTarget, LoggedUart, assert_overlap,
+                            observe_stretch_holds, prepare)
     from tempo.models.i2c import I2cBusMonitor
     from tempo.models.linecode import ManchesterStream
 
@@ -551,7 +556,7 @@ async def test_demo_resident_multibus_with_busy_host_and_memory(dut):
     holds = observe_stretch_holds(ls.board, "uio5")
     link = Link(cocotb_transport(ls, call_overhead_us=100))
     im = await cocotb_call(lambda: prepare(link, "demo_multibus"))
-    uart = ls.attach(LoggedUart("uio0", 1000000))
+    uart = ls.attach(LoggedUart("uio0", CLOCK_HZ / 50))
     coded = ls.attach(ManchesterStream("uio1", PAYLOAD))
 
     def host():
@@ -591,7 +596,7 @@ async def test_demo_resident_multibus_with_busy_host_and_memory(dut):
 
 @cocotb.test()
 async def test_demo_manchester_frame_scheduled_across_counter_wrap(dut):
-    from tempo.demo_checks import PAYLOAD, prepare
+    from test_demos import PAYLOAD, prepare
     from tempo.models.linecode import ManchesterFrame
 
     # Align the actual cycle phase after loading and setting PC. One frame

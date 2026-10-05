@@ -8,6 +8,7 @@ one.
 """
 
 from collections import deque
+from ..clock import CLOCK_HZ
 
 
 def _parity_bit(ones, parity):
@@ -49,7 +50,7 @@ class UartRx:
         frame had no interior transitions to measure from.
     """
 
-    def __init__(self, net, baud, bits=8, parity=None, stop=1, clock_hz=50e6, invert=False):
+    def __init__(self, net, baud, bits=8, parity=None, stop=1, clock_hz=CLOCK_HZ, invert=False):
         self.net = net
         self.invert = int(invert)  # line idles low, bits inverted (e.g. RS-232 levels after a plain buffer)
         self.baud = baud
@@ -162,7 +163,7 @@ class UartTx(object):
     Useful for feeding a UartRx a signal at the wrong rate.
     """
 
-    def __init__(self, net, baud, bits=8, parity=None, stop=1, clock_hz=50e6, baud_error=0.0,
+    def __init__(self, net, baud, bits=8, parity=None, stop=1, clock_hz=CLOCK_HZ, baud_error=0.0,
                  invert=False):
         self.net = net
         self.invert = int(invert)

@@ -16,13 +16,15 @@ sensitivity analysis, not a measurement of RP2350 or MicroPython latency.
 import os
 import sys
 
+from .clock import CLOCK_HZ
+
 HOST_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "host")
 if HOST_DIR not in sys.path:
     sys.path.insert(0, HOST_DIR)
 
 
 class SimTransport:
-    def __init__(self, driver, run, run_until, board, clock_hz=50e6, record=None,
+    def __init__(self, driver, run, run_until, board, clock_hz=CLOCK_HZ, record=None,
                  call_overhead_us=0):
         if call_overhead_us < 0:
             raise ValueError("host call overhead must be nonnegative")

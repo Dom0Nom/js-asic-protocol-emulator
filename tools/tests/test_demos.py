@@ -2,13 +2,86 @@
 
 import pytest
 
-from tempo.demo_checks import (PAYLOAD, LoggedI2cTarget, LoggedUart, assert_overlap,
-                               observe_stretch_holds, prepare)
+from tempo.clock import CLOCK_HZ
 from tempo.harness import Harness
-from tempo.models.i2c import I2cBusMonitor
+from tempo.models.i2c import I2cBusMonitor, I2cTarget
 from tempo.models.linecode import ManchesterFrame, ManchesterStream
+from tempo.models.uart import UartRx
 from tempo.transport import model_transport
+from tempo_host.images import IMAGES
 from tempo_host.link import Link
+
+# The helpers below are shared with the RTL version of these tests in test/test_usecases.py.
+PAYLOAD = b"\xa5\x96\x3c\x69"
+
+
+class LoggedUart(UartRx):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.starts = []
+
+    def _start_frame(self, cycle):
+        self.starts.append(cycle)
+        super()._start_frame(cycle)
+
+
+class LoggedI2cTarget(I2cTarget):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.stretches = []
+
+    def _on_bus_scl_falling(self, cycle):
+        super()._on_bus_scl_falling(cycle)
+        self.stretches.append((cycle, cycle + self.stretch_cycles))
+
+
+def observe_stretch_holds(board, scl):
+    """Intervals where SCL is low only because a device holds it (the chip has released it)."""
+    original = board.resolve
+    holds = []
+
+    def resolve(drives):
+        nets = original(drives)
+        if (drives[0].get(scl) is None and nets.get(scl) == 0 and
+                any(d.get(scl) == 0 for d in drives[1:])):
+            cycle = board.cycle + 1
+            if holds and holds[-1][1] == cycle:
+                holds[-1] = (holds[-1][0], cycle + 1)
+            else:
+                holds.append((cycle, cycle + 1))
+        return nets
+
+    board.resolve = resolve
+    return holds
+
+
+def assert_overlap(uart, coded, target, holds):
+    start = next(e.cycle for e in target.events if e.kind == "start")
+    stop = next(e.cycle for e in target.events if e.kind == "stop")
+    # Require simultaneous Manchester payload, a UART frame and external
+    # SCL low while the controller releases it, inside observed START/STOP.
+    overlaps = []
+    for f in coded.frames:
+        for lo, hi in target.stretches:
+            for u in uart.starts:
+                a = max(start, f.start_cycle, lo, u)
+                b = min(stop, f.start_cycle + 1600, hi, u + 500)
+                if b <= a:
+                    continue
+                for released, resumed in holds:
+                    if min(b, resumed) > max(a, released):
+                        overlaps.append((max(a, released), min(b, resumed)))
+    assert overlaps, "no three-protocol overlap during I2C clock stretching"
+    return overlaps
+
+
+def prepare(link, name):
+    im = IMAGES[name]
+    link.load(im)
+    for _ in range(50):
+        if not link.status().run & 3:
+            return im
+    raise AssertionError("demo initialization did not halt transmit threads")
 
 
 @pytest.mark.parametrize("cost", [0, 20, 100])
@@ -20,7 +93,7 @@ def test_three_protocols_run_in_one_image_under_memory_and_host_load(cost):
     holds = observe_stretch_holds(h.board, "uio5")
     link = Link(model_transport(h, call_overhead_us=cost))
     im = prepare(link, "demo_multibus")
-    uart = h.attach(LoggedUart("uio0", 1000000))
+    uart = h.attach(LoggedUart("uio0", CLOCK_HZ / 50))
     coded = h.attach(ManchesterStream("uio1", PAYLOAD))
     link.set_pc(0, im["consts"]["uart_run"])
     link.set_pc(1, im["consts"]["mc_run"])

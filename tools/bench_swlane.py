@@ -21,10 +21,11 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
+from tempo.clock import CLOCK_HZ  # noqa: E402
 from tempo.harness import Harness  # noqa: E402
 from tempo.models.uart import UartRx  # noqa: E402
 
-CLOCK = 25e6
+CLOCK = float(CLOCK_HZ)
 FW = "bench_swuart.s"
 SOURCES = ["fw/bench_swuart.s", "fw/tempo.inc", "tools/bench_swlane.py", "tools/tempo/sim.py",
            "tools/tempo/lane.py", "tools/tempo/isa.py", "tools/tempo/asm.py",

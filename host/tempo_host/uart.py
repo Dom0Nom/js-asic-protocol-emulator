@@ -7,14 +7,13 @@ forwards the ring to the host. Autobaud uses the "autobaud" image
 (fw/autobaud.s): edge timestamps from capture mode, analysed here.
 """
 
-from .images import IMAGES
+from .images import CLOCK_HZ, IMAGES
 from .link import TempoError
 
 NOPIN = 15
 E_D, E_DEN = 1, 16
 SYM_HI = (1 << 15) | (1 << 14)
 P_I, PP_I = 2, 32
-CLOCK_HZ = 50000000
 
 STANDARD_BAUDS = (300, 600, 1200, 2400, 4800, 9600, 14400, 19200, 28800, 31250, 38400, 57600,
                   74880, 76800, 115200, 128000, 153600, 230400, 250000, 256000, 460800, 500000,

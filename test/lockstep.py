@@ -16,6 +16,7 @@ from cocotb.clock import Clock  # noqa: E402
 from cocotb.triggers import ClockCycles, FallingEdge, ReadOnly  # noqa: E402
 
 from tempo import isa  # noqa: E402
+from tempo.clock import CLOCK_PS  # noqa: E402
 from tempo.harness import Harness, net_of_input, net_of_output, pads_to_index  # noqa: E402
 
 
@@ -48,7 +49,7 @@ class Lockstep:
 
     async def start(self):
         d = self.dut
-        cocotb.start_soon(Clock(d.clk, int(os.environ.get("TEMPO_CLK_NS", "20")), unit="ns").start())
+        cocotb.start_soon(Clock(d.clk, CLOCK_PS, unit="ps").start())
         d.ena.value = 1
         d.ui_in.value = 0
         d.uio_in.value = 0

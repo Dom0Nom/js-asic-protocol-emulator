@@ -2,8 +2,7 @@
 """SWD debug probe: attach to an Arm MCU the way a debug probe does.
 
 Runs the "swd" firmware image (fw/swd.s). Protocol details follow Arm
-ADIv5.2 (IHI 0031G) chapters B2, B4, C2 and D1, summarised in
-docs/specs.md section 5.
+ADIv5.2 (IHI 0031G) chapters B2, B4, C2 and D1.
 """
 
 from .images import IMAGES
@@ -155,7 +154,7 @@ class Swd:
 
     def rom_table(self, apsel=0, max_entries=32):
         """MEM-AP IDR and BASE, then the ROM table's entries, each with its
-        component class (D1, docs/specs.md 5.3)."""
+        component class (ADIv5.2 D1)."""
         idr = self.ap_read(apsel, AP_IDR)
         base = self.ap_read(apsel, AP_BASE)
         if base == 0xFFFFFFFF or not base & 1:

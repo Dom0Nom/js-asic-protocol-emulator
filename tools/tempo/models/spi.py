@@ -14,6 +14,8 @@ leading edge and samples on the trailing edge. This is standard SPI timing
 (see any SPI mode timing diagram, e.g. Motorola/Freescale SPI block guide).
 """
 
+from ..clock import CLOCK_HZ
+
 
 class SpiViolation:
     __slots__ = ("cycle", "kind", "detail")
@@ -248,7 +250,7 @@ class SpiFlashLike(SpiSlave):
 
 def sfdp_image(size_bytes, page=256):
     """A minimal SFDP area (JESD216 layout as parsed by Linux
-    drivers/mtd/spi-nor/sfdp.c, see docs/specs.md 3.2): header, one parameter
+    drivers/mtd/spi-nor/sfdp.c): header, one parameter
     header for the Basic Flash Parameter Table, and a 9-DWORD BFPT whose
     DWORD 2 holds the density in bits (size - 1)."""
     img = bytearray([0xFF]) * 256
@@ -263,7 +265,7 @@ def sfdp_image(size_bytes, page=256):
 
 
 class SpiNorFlash(SpiSlave):
-    """SPI NOR flash (W25Q128JV-like command set, docs/specs.md section 3).
+    """SPI NOR flash (W25Q128JV-like command set).
 
     Commands: 0x9F JEDEC ID, 0x03 read, 0x0B fast read (8 dummy clocks),
     0x05 status (bit 0 BUSY, bit 1 WEL), 0x06 WREN, 0x04 WRDI, 0x02 page
@@ -273,7 +275,7 @@ class SpiNorFlash(SpiSlave):
     tests). Protocol misuse is recorded in `violations` (kind 'protocol')."""
 
     def __init__(self, sck, mosi, miso, cs, size=1 << 16, jedec_id=(0xEF, 0x40, 0x18),
-                 t_pp=0.4e-3, t_se=45e-3, clock_hz=50e6, mem=None, **kw):
+                 t_pp=0.4e-3, t_se=45e-3, clock_hz=CLOCK_HZ, mem=None, **kw):
         kw.pop('response', None)
         super().__init__(sck, mosi, miso, cs, response=None, **kw)
         self.size = size

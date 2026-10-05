@@ -18,7 +18,6 @@ from .uart import bit_time
 NOPIN = 15
 E_D, E_DEN = 1, 16
 P_I, PP_I = 2, 32
-CLOCK_HZ = 50000000
 
 
 class PulseTrigger:

@@ -22,6 +22,7 @@ drift the transmitter is configured with as long as stuffing holds.
 """
 
 from collections import deque
+from ..clock import CLOCK_HZ
 
 # USB PIDs we support (low speed doesn't need high-speed-only ones).
 # PID<3:0> values are standard (see USB 2.0 spec Table 8-1).
@@ -172,7 +173,7 @@ class UsbLsReceiver:
     own clock_hz/1.5e6 nominal bit period.
     """
 
-    def __init__(self, dp, dm, clock_hz=25e6):
+    def __init__(self, dp, dm, clock_hz=CLOCK_HZ):
         self.dp = dp
         self.dm = dm
         self.cycles_per_bit = clock_hz / 1.5e6
@@ -344,7 +345,7 @@ class UsbLsTransmitter:
     edge of the low-speed +/-1.5% tolerance (USB 2.0 spec 7.1.11).
     """
 
-    def __init__(self, dp, dm, clock_hz=25e6, bit_rate_error=0.0):
+    def __init__(self, dp, dm, clock_hz=CLOCK_HZ, bit_rate_error=0.0):
         self.dp = dp
         self.dm = dm
         self.cycles_per_bit = clock_hz / (1.5e6 * (1 + bit_rate_error))

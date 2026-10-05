@@ -3,8 +3,8 @@
 
 An 11-bit manufacturer field is (continuation-code count << 7) | 7-bit code
 with the parity bit stripped (IDCODE bits 11:1, DPIDR DESIGNER). A short
-list of common vendors, checked against OpenOCD src/helper/jep106.inc
-(docs/specs.md 4.3); anything else prints as bank/code.
+list of common vendors, checked against OpenOCD src/helper/jep106.inc;
+anything else prints as bank/code.
 """
 
 NAMES = {

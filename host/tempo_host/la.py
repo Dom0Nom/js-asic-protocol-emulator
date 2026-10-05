@@ -10,11 +10,10 @@ share that delay, so intervals between edges are exact to +-1 cycle (the asynchr
 input is sampled on a clock edge).
 """
 
-from .images import IMAGES
+from .images import CLOCK_HZ, IMAGES
 from .link import TempoError
 
 NOPIN = 15
-CLOCK_HZ = 50000000
 P_A, PP_A = 8, 128
 
 

@@ -5,9 +5,12 @@ board's pull-up resolves an undriven net to 1.
 
 Timing minimums are from NXP UM10204 (I2C-bus specification and user
 manual, Rev. 7.0, 2021) section 6.1, Table 11: Standard-mode (100 kHz),
-Fast-mode (400 kHz) and Fast-mode Plus (1 MHz) columns (see docs/specs.md). Values are in seconds here and converted to whole cycles with the
+Fast-mode (400 kHz) and Fast-mode Plus (1 MHz) columns.
+Values are in seconds here and converted to whole cycles with the
 device's clock_hz at construction time.
 """
+
+from ..clock import CLOCK_HZ
 
 # NXP UM10204 Rev. 7.0, Table 11 "Characteristics of the SDA and SCL bus
 # lines for Standard, Fast, and Fast-mode Plus I2C-bus devices" (it was
@@ -74,7 +77,7 @@ class _I2cBusBase:
     anything) to drive back onto the bus.
     """
 
-    def __init__(self, scl, sda, mode='standard', clock_hz=50e6):
+    def __init__(self, scl, sda, mode='standard', clock_hz=CLOCK_HZ):
         self.scl = scl
         self.sda = sda
         self.clock_hz = clock_hz
@@ -247,7 +250,7 @@ class I2cBusMonitor(_I2cBusBase):
     """Passive observer: never drives, only checks rules and logs
     START/STOP/address/data/ack events."""
 
-    def __init__(self, scl, sda, mode='standard', clock_hz=50e6):
+    def __init__(self, scl, sda, mode='standard', clock_hz=CLOCK_HZ):
         super().__init__(scl, sda, mode=mode, clock_hz=clock_hz)
         self._expect_addr = True
 
@@ -282,7 +285,7 @@ class I2cTarget(_I2cBusBase):
         this many extra cycles before releasing it.
     """
 
-    def __init__(self, scl, sda, address, regs=None, mode='standard', clock_hz=50e6,
+    def __init__(self, scl, sda, address, regs=None, mode='standard', clock_hz=CLOCK_HZ,
                  stretch_cycles=0, nack_addresses=(), nack_after=None, addr10=False):
         super().__init__(scl, sda, mode=mode, clock_hz=clock_hz)
         self.address = address
@@ -445,15 +448,15 @@ class I2cTarget(_I2cBusBase):
 
 
 class Eeprom24Target(I2cTarget):
-    """24Cxx serial EEPROM (Microchip AT24C02C / 24LC256 behaviour, see
-    docs/specs.md): 1 or 2 memory address bytes, block-select bits in the
+    """24Cxx serial EEPROM (Microchip AT24C02C / 24LC256 behaviour):
+    1 or 2 memory address bytes, block-select bits in the
     device address for 24C04/08/16, page writes that roll over inside the
     page, and a self-timed write cycle after STOP during which the part
     NACKs its address (ACK polling). `t_wr` is in seconds; tests shorten
     it to keep simulations fast."""
 
     def __init__(self, scl, sda, size=256, page=8, abytes=1, address=0x50, t_wr=5e-3,
-                 mode='standard', clock_hz=50e6, stretch_cycles=0):
+                 mode='standard', clock_hz=CLOCK_HZ, stretch_cycles=0):
         super().__init__(scl, sda, address, regs=bytearray([0xFF]) * size, mode=mode,
                          clock_hz=clock_hz, stretch_cycles=stretch_cycles)
         self.size, self.page, self.abytes = size, page, abytes

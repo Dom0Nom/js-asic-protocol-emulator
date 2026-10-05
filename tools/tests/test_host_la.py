@@ -6,6 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from tempo.clock import CLOCK_HZ  # noqa: E402
 from tempo.harness import Harness  # noqa: E402
 from tempo.models.siggen import Pulses, Square  # noqa: E402
 from tempo.transport import model_transport  # noqa: E402
@@ -34,7 +35,7 @@ def test_capture_exact_intervals_markers_and_vcd():
     assert all(b[0] - a[0] == (300 if a[1] else 700) for a, b in zip(got0, got0[1:]))
     assert deltas(cap.edges[2]) == [50, 49950, 13]  # a 50000-cycle gap spans many markers
     m = cap.measure(0)
-    assert abs(m["frequency_hz"] - 50000) < 1 and abs(m["duty"] - 0.3) < 0.01
+    assert abs(m["frequency_hz"] - CLOCK_HZ / 1000) < 1 and abs(m["duty"] - 0.3) < 0.01
     buf = io.StringIO()
     cap.to_vcd(buf)
     assert "$var wire 1 ! clk $end" in buf.getvalue()

@@ -2,7 +2,7 @@
 ; (released in receive slots and when idle, CFG.DREL), SWCLK its C pin.
 ; Each bit slot: SWCLK low in the first half, rising at P_CR; the host
 ; changes SWDIO at the slot start and samples at P_SAMP, before the rising
-; edge on which the target changes SWDIO (ADIv5.2 B4.3.1, docs/specs.md 5.1).
+; edge on which the target changes SWDIO (ADIv5.2 B4.3.1).
 ;
 ; Host words:
 ;   0x1000 | n  SEQ: n bits (1..4095) driven from the following words, LSB

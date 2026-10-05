@@ -11,7 +11,6 @@ cycles (40 ns at the declared 25 MHz) from the first timed record.
 from .images import IMAGES
 
 NOPIN = 15
-CLOCK_HZ = 50000000
 
 
 class _Clock:

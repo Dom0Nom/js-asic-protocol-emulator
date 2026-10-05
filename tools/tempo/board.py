@@ -7,6 +7,7 @@ contention; the board records it and resolves to 0.
 """
 
 from dataclasses import dataclass, field
+from .clock import CLOCK_HZ
 
 
 class Device:
@@ -21,7 +22,7 @@ class Device:
 
 @dataclass
 class Board:
-    clock_hz: float = 50e6
+    clock_hz: float = CLOCK_HZ
     pullups: set = field(default_factory=set)
     devices: list = field(default_factory=list)
     nets: dict = field(default_factory=dict)

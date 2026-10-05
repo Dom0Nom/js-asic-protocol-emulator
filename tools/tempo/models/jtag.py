@@ -1,5 +1,4 @@
-"""JTAG TAP chain model (IEEE 1149.1 behaviour as summarised in
-docs/specs.md section 4: TI SSYA002C, OpenOCD).
+"""JTAG TAP chain model (IEEE 1149.1 behaviour; TI SSYA002C, OpenOCD).
 
 TMS and TDI are sampled on the rising edge of TCK; TDO changes on the
 falling edge and is driven only in Shift-DR and Shift-IR (high impedance

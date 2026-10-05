@@ -6,6 +6,8 @@ Runs unchanged under CPython and MicroPython. A transport supplies
 `sleep_us(us)` and `ticks_us()`. See docs/architecture.md, Host port.
 """
 
+from .images import CLOCK_HZ
+
 CMD_WRITE_IMEM = 0x01
 CMD_READ_IMEM = 0x02
 CMD_CONTROL = 0x05
@@ -79,7 +81,7 @@ def _words(b):
     return [(b[i] << 8) | b[i + 1] for i in range(0, len(b) - 1, 2)]
 
 
-CHIP_CLOCK_HZ = 25000000  # declared clock: info.yaml clock_hz, CLOCK_PERIOD 40 ns
+CHIP_CLOCK_HZ = CLOCK_HZ  # the declared clock (info.yaml clock_hz)
 
 
 class Link:

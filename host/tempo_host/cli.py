@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Command line for the Tempo host library.
 
-The same module runs on the demo board's RP2350 (MicroPython, commands typed
-over USB serial) and on a PC (CPython, `tools/tempo_cli.py`, against the
-board or against the chip model). Commands: see HELP. Pins are Tempo pin
+Runs under CPython and MicroPython; `tools/tests/test_cli.py` runs it
+against the chip model. Commands: see HELP. Pins are Tempo pin
 indices (0-7 = uio0-7, 8-15 = ui0-7 as inputs) or names: uio4, ui3.
 Numbers accept 0x prefixes. Output goes through `out(line)`.
 """

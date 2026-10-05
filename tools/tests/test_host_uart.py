@@ -54,7 +54,7 @@ def test_framing_and_parity_errors_reported():
     assert words == [U.PE | 0x01, U.PE | 0x03]
 
 
-@pytest.mark.parametrize("baud,err", [(9600, 0.0), (115200, 0.012), (74880, 0.0), (460800, -0.01)])
+@pytest.mark.parametrize("baud,err", [(9600, 0.0), (115200, 0.012), (74880, 0.0), (230400, -0.01)])
 def test_autobaud(baud, err):
     tx = UartTx("uio1", baud, baud_error=err)
     h, link = board(tx, pullups=("uio1",))

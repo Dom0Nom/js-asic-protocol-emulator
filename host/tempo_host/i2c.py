@@ -2,7 +2,7 @@
 """I2C master: bus scan, register access, 24Cxx EEPROMs, bus recovery.
 
 Runs the "i2c" firmware image (fw/i2c.s) on lane 2. Timing per NXP UM10204
-(see docs/specs.md): the bit slot is split so that SCL low and high times
+Table 11: the bit slot is split so that SCL low and high times
 meet tLOW/tHIGH of the chosen mode (slots scale with the link's clock).
 """
 
@@ -148,7 +148,7 @@ class I2c:
 
 class Eeprom24:
     """24Cxx serial EEPROM. Page size and address width from the part
-    number (Microchip AT24C02C, 24LC256 datasheets, see docs/specs.md)."""
+    number (Microchip AT24C02C, 24LC256 datasheets)."""
 
     PARTS = {
         # part: (size bytes, page bytes, address bytes)

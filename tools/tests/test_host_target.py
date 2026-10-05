@@ -35,7 +35,7 @@ def test_mcu_writes_and_random_reads_emulated_eeprom():
     run(h, mcu)
     h.run(2000)
     # writes roll over inside the page, sequential reads run on across it
-    # (docs/specs.md section 2): 0x06, 0x07, then 0x08 and 0x09 unchanged
+    # (AT24C02C datasheet): 0x06, 0x07, then 0x08 and 0x09 unchanged
     assert mcu.reads == [0xB8, 0xB9, 0x08, 0x09], [hex(x) for x in mcu.reads]
     # another address is not answered
     mcu.run([("start",), ("write", 0xA2), ("stop",)])

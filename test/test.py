@@ -7,6 +7,7 @@ import os
 import cocotb
 
 from lockstep import Lockstep
+from tempo.clock import CLOCK_HZ
 from tempo.models.uart import UartRx
 from tempo.models.spi import SpiFlashLike
 from tempo.models.i2c import I2cTarget
@@ -36,7 +37,7 @@ async def test_register_banks_and_host_debug_reads(dut):
 TX_SRC = """
         .include "tempo.inc"
         .equ PER, 16
-        .equ FRACV, 171                ; 50 MHz / 3 Mbaud = 16.67 cycles
+        .equ FRACV, 171                ; 16.67 cycles per bit
         .entry 0, main
 main:   lc   r1, (NOPIN << 12) | (NOPIN << 8) | (NOPIN << 4) | UO0
         lw   l0, pins, r1
@@ -64,7 +65,7 @@ async def test_host_boot_and_uart_tx(dut):
     await ls.start()
     await ls.boot()
     await ls.run(100)  # firmware sets the line idle; uo0 is low from reset until then
-    rx = ls.attach(UartRx("uo0", 3_000_000))
+    rx = ls.attach(UartRx("uo0", CLOCK_HZ / (16 + 171 / 256)))
     data = [0x55, 0x00, 0xFF, 0xA5, 0x3C]
     await ls.mbox_write(data)
     await ls.run(17 * 10 * (len(data) + 1))
@@ -110,8 +111,7 @@ async def test_i2c_write_read_with_stretching(dut):
 @cocotb.test()
 async def test_usb_ls_rx_and_tx(dut):
     from tempo.models.usb_ls import UsbLsReceiver, UsbLsTransmitter
-    clk_khz = 1_000_000 // int(os.environ.get("TEMPO_CLK_NS", "20"))  # firmware and models follow the sim clock
-    clock_hz = clk_khz * 1000
+    clock_hz, clk_khz = CLOCK_HZ, CLOCK_HZ // 1000
     bits = lambda n: int(n * clock_hz / 1.5e6) + 1  # noqa: E731
     ls = Lockstep(dut, f'.equ USB_CLK_KHZ, {clk_khz}\n.include "usb_ls_phy.s"\n', pullups={"uio6"})
     await ls.start()
@@ -135,7 +135,7 @@ async def test_usb_ls_rx_and_tx(dut):
 
 UART_RX_SRC = """
         .include "tempo.inc"
-        .equ PER, 50                       ; 1 Mbaud
+        .equ PER, 50
         .entry 1, main
 main:   lc   r1, (NOPIN << 12) | (NOPIN << 8) | ((UI0 + 0) << 4) | NOPIN
         lw   l1, pins, r1
@@ -164,7 +164,7 @@ async def test_uart_rx_fast_sender(dut):
     await ls.start()
     await ls.boot()
     await ls.run(200)  # firmware configures the lane and arms the receive
-    tx = ls.attach(UartTx("ui0", 1_000_000, baud_error=0.02))
+    tx = ls.attach(UartTx("ui0", CLOCK_HZ / 50, baud_error=0.02))
     data = [0x00, 0xFF, 0xA5, 0x5A]
     tx.send(bytes(data))
     await ls.run(50 * 10 * 5)
