@@ -23,15 +23,13 @@
   "PL_RESIZER_HOLD_SLACK_MARGIN": 0.1,
   "GRT_RESIZER_HOLD_SLACK_MARGIN": 0.05,
 
-  "//": "Timing and electrical repair run at the slow and fast corners (the default is typical only, which left slow-corner slew violations and did no setup optimisation where it mattered). Post-GRT design repair takes about 50 min but converges. CTS clusters of 8 sinks. OPENROAD_THREADS: detailed routing is single-threaded without it.",
+  "//": "Timing and electrical repair run at the slow and fast corners (the default is typical only, which left slow-corner slew violations and did no setup optimisation where it mattered). Post-GRT design repair stays off: it converges (54 min) but its extra buffers leave detailed routing stuck at 14 to 34 violations after 43 iterations. CTS clusters of 8 sinks. OPENROAD_THREADS: detailed routing is single-threaded without it.",
   "PNR_CORNERS": ["nom_slow_1p08V_125C", "nom_fast_1p32V_m40C"],
   "RSZ_CORNERS": ["nom_slow_1p08V_125C", "nom_fast_1p32V_m40C"],
   "CTS_CORNERS": ["nom_slow_1p08V_125C", "nom_fast_1p32V_m40C"],
   "DESIGN_REPAIR_MAX_SLEW_PCT": 30,
   "DESIGN_REPAIR_MAX_CAP_PCT": 30,
-  "RUN_POST_GRT_DESIGN_REPAIR": true,
-  "GRT_DESIGN_REPAIR_MAX_SLEW_PCT": 20,
-  "GRT_DESIGN_REPAIR_MAX_CAP_PCT": 20,
+  "RUN_POST_GRT_DESIGN_REPAIR": false,
   "CTS_SINK_CLUSTERING_SIZE": 8,
   "OPENROAD_THREADS": 10,
 
