@@ -37,7 +37,7 @@ LOGS = [
 
 def summarise(log):
     lines = Path(log).read_text(errors="replace").splitlines()
-    out = [ln.strip() for ln in lines if KEEP.search(ln)]
+    out = [ln.strip() for ln in lines if KEEP.search(ln) and ln.count("=") < 8]
     steps = [ln.strip() for ln in lines if "Checking assertions in step" in ln]
     return "\n".join(ln[-200:] for ln in out + steps[-1:]) + "\n"
 
@@ -58,10 +58,13 @@ def outcome(text):
     m = re.findall(r"(\d+) commits matched", text)
     if m:
         parts.append("{:,} instruction commits matched".format(sum(map(int, m))))
-    sby = re.findall(r"\[(\w+)\] DONE \((\w+)", text)
-    parts += ["%s %s" % (task.split("_")[-1], res) for task, res in sby]
+    m = re.search(r"random lockstep: (\d+) seeds", text)
+    if m:
+        parts.insert(0, "%s programs" % m.group(1))
+    sby = re.findall(r"\[(?:core_cover|core|lane_anchor|lane_miter)_(\w+)\] DONE \((\w+)", text)
+    parts += ["%s %s" % (task, res) for task, res in sby]
     step = re.findall(r"\[\w+_bmc\].*Checking assertions in step (\d+)", text)
-    if step and not any(task.endswith("_bmc") for task, _ in sby):
+    if step and not any(task == "bmc" for task, _ in sby):
         parts.append("bmc: no counterexample through step %d, then timeout" % (int(step[-1]) - 1))
     return "; ".join(parts) or "no result"
 
