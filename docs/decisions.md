@@ -1,214 +1,123 @@
 # Decisions
 
-Newest decisions are appended at the end of each section. Each entry says what was chosen, what else was considered, and why.
+The design is described in [architecture.md](architecture.md).
 
-## Architecture: Tempo (cut-down), 2026-09-25
+## Barrel threads plus timed lanes
 
-Chosen: Tempo as specified in `docs/architecture.md`: a 4-thread barrel core sharing one 1024x16 SRAM, two full and two lite lanes (timed line-code engines with a symbol table), a latch scratch RAM, and a host SPI port. Runners-up: B (PRU-style RISC with timed IO) scored 56 against 59, A (PIO-plus) 51.
+**Decision:** Four barrel threads on one 16-bit datapath, and three lanes that turn queued commands into pin edges on their own counters.
 
-Why not B: smallest and most verifiable, but one thread cannot run concurrent protocols without a software scheduler, USB low speed would consume the whole core, and a public Hardcaml entry is already a PRU-style core with deadline registers and a timing analyser. B would be judged head to head against it.
+**Why:** Bit timing does not depend on instruction counts. One thread can serve several protocols, and four threads share one program memory.
 
-Why not A: four fetches per cycle rule out a shared SRAM, program space stays at tens of instructions, and several public entries are already PIO variants.
+**Rejected:**
+- Four PIO-style state machines with an extended instruction set. Each machine fetches every cycle, which needs a multi-port flop memory or four macros. Program space stays at tens of instructions, and timing still comes from counting instructions.
+- One RISC core with direct pin registers and a wait-until instruction, in the style of the TI PRU. It is the smallest option, but it has one thread, so concurrent protocols need a software scheduler, and USB low-speed coding would consume the whole core.
 
-Why Tempo: the design separates lane timelines from instruction scheduling,
-uses a symbol table to describe line codes as data, and shares one
-single-port SRAM among four barrel threads. Timing independence is an
-intended, conditional guarantee that can be checked with a miter; its
-all-mode proof is unfinished. This combination is the submission's focus,
-not a verified claim that no competing architecture shares these ideas.
-The prior-art review and limits below qualify the novelty pitch.
+## One SRAM macro for all threads
 
-### Critic review of the first draft and resolutions
+**Decision:** A single 1024 x 16 single-port SRAM holds code and data. Threads read and write it with `ldi` and `sti` through their own next fetch slot. A separate 8-word flop array is the only other shared memory.
 
-A fresh-context reviewer attacked the first draft (27 findings: 5 critical, 19 major, 3 minor). Resolutions:
+**Why:** An SRAM bit costs about a seventh of a writable flop in this library. The barrel fetches once per cycle, so one port is enough. Each macro adds power-grid and routing risk, so there is exactly one.
 
-| # | Finding | Resolution |
-|---|---|---|
-| 1 | Novelty claims mostly prior art (XMOS, P2 smart pins, PIO divider, competitor lanes and methodology) | Accepted. Pitch rebuilt around the timing-independence theorem, the symbol table (now per-symbol length, relative levels) and capture mode; prior art credited explicitly. |
-| 2 | Lanes look like fixed peripherals; threads barely touch pins | Partly accepted. Raw `start` + `emit` gives threads cycle-exact pin control on any lane pin, and PS/2 is planned as a pure-thread protocol. Rebutted the extra `iowt` instruction: `start`+`emit` already is a timed pin write, so a second mechanism would only add area. |
-| 3 | Scoring omitted schedule | Accepted: schedule criterion (weight 3) added and scores revised. |
-| 4 | Area under-estimated by 40-50% | Accepted: re-estimated at about 12.5k cells. Cut-down lanes and 13-bit intra-slot offsets reduce it; latches for static lane config are the next lever if synthesis runs high. |
-| 5 | Two SRAM macros are the real physical risk | Accepted: one macro (IMEM 1024x16); data memory is a 32-word latch array plus `ldi` reads from IMEM for constant tables. GitHub CI and precheck before any significant RTL is a stop-and-ask item (pushing needs the user). |
-| 6 | Combinational pin resolution contradicts registered outputs | Accepted: resolved pad outputs are registered (one cycle, in the spec). |
-| 7 | Name the timing paths | Accepted: tracked with each harden. |
-| 8 | 16-bit time horizon | Partly accepted: per-lane prescaler (PRE) for long slots; `waitt` sets thread LATE for deadlines interpreted as past. Firmware must keep deadlines within 32767 cycles: farther targets are ambiguous, and timestamps a whole epoch away can alias an on-time deadline without LATE. Rebutted 24-bit `NOW`: registers are 16 bits, so wider time would need multi-word arithmetic; long timeouts loop in firmware. |
-| 9 | Config writes race queued commands | Accepted: `lw`, `start` and `sync` go through the command queue, in order. |
-| 10 | Firmware sketches did not assemble | Accepted: `andi` is now `simm9` (masks bytes), `xori` added, PC is 10 bits for 1024 words, sketches marked illustrative with the tested firmware in `fw/`. |
-| 11 | UART RX misses back-to-back frames | Accepted: a receive command ends one cycle after its last sample. |
-| 12 | Check-at-issue, commit-later races | Accepted: every instruction checks and commits in one cycle (normative). |
-| 13 | RX status per lane, not per entry; overflow undefined | Accepted: per-entry `{word, count, END, ERR}`, `rx` returns END/ERR in flags, OVERRUN drops the newest word. |
-| 14 | Timing failures can pass silently | Accepted: OVERRUN, thread LATE for `waitt`, lane LATE and UNDER. |
-| 15 | Sticky events not consumed; write-1-to-clear race | Accepted: `wait` consumes pattern events, `stat` is read-and-clear in one commit. |
-| 16 | I2C repeated START, arbitration, slave mode, glitches | Accepted: stretch applies to `emit` slots, ARB mode stops driving at the first lost bit, both patterns active in every state, per-lane input stability filter. Slave mode is firmware on patterns plus raw slots, not a lane mode. |
-| 17 | Pin role semantics | Accepted: DREL, A holds its last `emit` level, pin index 15 = none, PINCONFLICT flag. EXTCLK removed (see cuts). |
-| 18 | Stuffing and CRC at command boundaries | Accepted: rules written into the coding section. CAN receive declared best effort (no SJW). |
-| 19 | No select or timeouts | Accepted: `wany` with a deadline; `stop` aborts a stretched lane. |
-| 20 | Host DMEM starvation, MISO timing, register reads of running threads | Accepted: no host data-memory access (mailboxes instead), `HSCK <= clk/10`, register reads and PC writes only on halted threads. |
-| 21 | ISA gaps | Accepted: `xori`, flag behaviour specified, `tstat`. |
-| 22 | `docs/decisions.md` missing | Resolved (this file). |
-| 23 | Fixed-slot codes only | Accepted: per-symbol slot length covers pulse-distance codes; capture mode covers receive of codes the pipeline cannot decode. |
-| 24 | Lockstep cost and convergence | Accepted: semantics frozen here first; lockstep compares commit records and pad traces; Verilator for long runs. |
-| 25 | What SBY can prove | Early plan proposed width-parameterised lanes; that abstraction was abandoned. Current lane counters have fixed widths, and `FULL` selects features only. The limited full-width miter remains unfinished (`docs/verification.md`). |
-| 26 | Schedule over budget | Accepted: cuts below, gates below. |
-| 27 | Pick a cut-down Tempo, not A or B | Accepted. |
+**Rejected:** A second SRAM for data. A separate data port for threads. A host-accessible data memory; the mailboxes replace it.
 
-### Cuts and gates
+## Verilog-2005 with a generated ISA header
 
-Cut, in this order if more is needed: 10BASE-T becomes a simulated TX waveform only; external-clock lane mode removed (done; a receive-only external clock came back in the use-case batch below); lanes 2-3 lite (done); data SRAM macro replaced by latches (done); CAN limited to TX, arbitration and best-effort RX; drop lite lanes to one (done 2026-09-26, see below); next: latch-based lane configuration registers, then a latch register file.
+**Decision:** Plain Verilog-2005. Instruction encodings are defined once in [tools/tempo/isa.py](../tools/tempo/isa.py), which generates `src/tempo_isa.vh` and drives the assembler, the disassembler and the model.
 
-Gates: SRAM harden clean and a one-lane synthesis number before the full core; UART, SPI and I2C master in RTL lockstep by the end of week 5 (2026-10-30); USB low-speed device enumerating in simulation by week 9 (2026-11-27) or USB is dropped; feature freeze in week 12 (2026-12-18).
+**Why:** It is the Tiny Tapeout default and works directly with the foundry SRAM macro, cocotb and SymbiYosys. One encoding table removes a class of decoder mismatches; a round-trip test covers all 65536 words.
 
-## HDL: Verilog-2005, with ISA tables generated from Python
+**Rejected:** Hardcaml (an OCaml toolchain on every machine, and the verification flow here is built on a Python model). Amaranth (an extra translation layer around the macro and the Tiny Tapeout flow with no verification benefit).
 
-Chosen: plain synthesizable Verilog (the Tiny Tapeout default), with the instruction encodings emitted into `src/tempo_isa.vh` by `tools/tempo/isa.py`, the same module the assembler and simulator use.
+## Cycle-level model as the specification
 
-Considered:
+**Decision:** The Python model in `tools/tempo/` predicts every pad on every cycle. The RTL is written to match it, and tests compare pad traces and instruction commits each cycle.
 
-- Hardcaml. Jane Street uses it and it would read well, but it needs an opam/OCaml toolchain on both machines, at least one public competing entry already uses it, and the verification plan here is built on a Python golden model that can drive cocotb directly. The time it would take buys less than spending the same effort on verification depth.
-- Amaranth. Python-native, so the model and the RTL would share a language, but mixing Amaranth with the foundry SRAM macros and the TT flow adds a translation layer, and cocotb plus formal on Amaranth-generated Verilog gives no advantage over hand-written Verilog.
+**Why:** The design's claims are about cycle timing; an instruction-level model cannot check them.
 
-What keeps the Verilog honest is not the language but the single source of truth: encodings live in one Python table, and every artifact that needs them is generated or checked against it (round-trip test over all 65536 encodings in `tools/tests/test_isa.py`).
+**Rejected:** An instruction-level simulator with separate timing tests.
+
+## Lane configuration goes through the command queue
+
+**Decision:** `lw`, `start` and `sync` are queue entries and apply in order between commands.
+
+**Why:** A direct register write races the commands already queued. Queued writes let firmware change line coding or reset the CRC between two back-to-back commands at a defined point.
+
+**Rejected:** Immediate register writes with firmware responsible for waiting until the lane is idle.
+
+## Registered pad outputs
+
+**Decision:** The resolved output values and enables pass one register before the pads.
+
+**Why:** Pin resolution across three lanes and GPIO is combinational. Registering it gives glitch-free pads and a constant one-cycle delay.
+
+**Rejected:** Combinational outputs, which would save one cycle of latency.
+
+## Lane input register
+
+**Decision:** Each lane registers its four selected and filtered pin values before using them.
+
+**Why:** Pin select, filter, pattern match, sample and next-command start formed the critical path of the design.
+
+**Cost:** One more cycle of input latency, 3 cycles in total. The edge-alignment offset is `4 + FILTER` cycles, and the SPI controller's minimum bit period is one cycle longer.
+
+**Rejected:** Keeping the path combinational, which limits the clock.
+
+## External-clock receive only
+
+**Decision:** A lane can receive on an external clock edge (`MODE.XCLK`). It cannot transmit on one.
+
+**Why:** Bus monitors and target receive need it; sampling in firmware loses bits because pattern events do not queue. An I2C target can transmit with clock stretching and timed slots.
+
+**Rejected:** Externally clocked transmit, which an SPI target would need. It was left out for area and verification effort.
+
+## Host port on the demo board's SPI pins
+
+**Decision:** The host port uses `ui[5]` SCK, `ui[6]` MOSI, `uo[3]` MISO and `ui[7]` CS. Output index 11 moves to `uo[7]`.
+
+**Why:** These are the RP2350's SPI0 pins on the Tiny Tapeout demo board, so the host uses its SPI peripheral.
+
+**Rejected:** A contiguous pin group driven by a bit-banged host.
 
 ## SRAM power hookup
 
-The TT IHP template builds a single-layer Metal4 power grid (`PDN_MULTILAYER` 0), and pdngen carves its stripes around macros, so nothing reaches the SRAM's Metal4 supply columns. The urish/ttihp-sram-test recipe (macro grid with a Metal4-to-Metal4 connect) fails on the current OpenROAD with `PDN-0003 Layers must be different in connect rule`.
+**Decision:** A LibreLane plugin step, `Project.ExtendPowerStripes` (`librelane_plugin_sram_pdn.py`), runs after PDN generation and redraws the Metal4 stripes onto the macro's supply columns. It cuts the straps at the macro's Metal4 obstructions.
 
-Chosen: a LibreLane plugin step, `Project.ExtendPowerStripes`, inserted after `OpenROAD.GeneratePDN`, which redraws the Metal4 stripes that cross the macro onto the macro's legal supply columns. The script comes from WilliamZhang20/protocol-emulator (Apache-2.0), which ported it from kdp1965/ihp-um-janestreet-prism (Apache-2.0). Local change: macro LEFs are passed from the `MACROS` config, so any SRAM size and more than one macro work without copying LEFs into the repo. Attribution is in the file headers.
+**Why:** The Tiny Tapeout IHP grid is a single Metal4 layer, and pdngen carves its stripes around macros, so nothing reaches the SRAM supply pins.
 
-Considered: writing a custom `PDN_CFG` with TopMetal1 straps (as pulp-platform/croc does). Rejected because TopMetal1 belongs to the TT top-level grid and the project routing stops at Metal4.
+**Rejected:** A macro grid with a Metal4-to-Metal4 connect rule (OpenROAD rejects it). TopMetal1 straps (that layer belongs to the Tiny Tapeout top level).
 
-## Simulator timing model
+The script is adapted from WilliamZhang20/protocol-emulator and kdp1965/ihp-um-janestreet-prism (Apache-2.0).
 
-The simulator is a synchronous, cycle-level model of the whole chip, not an instruction-level one: `step(pad_inputs)` returns the pad outputs driven during that cycle and then advances every register by one clock edge. Each thread's instruction is modelled as executing in one cycle (its issue cycle, `NOW mod 4 = thread`) with all effects visible from the next cycle. The RTL pipeline is arranged so its execute stage lines up with those cycles. Because the model predicts every pad on every cycle, RTL tests compare full pin traces as well as architectural state.
+## Per-corner SRAM timing views
 
-## Use-case RTL batch, 2026-09-25
+**Decision:** `src/config.json` maps `nom_typ_*`, `nom_fast_*` and `nom_slow_*` to the macro's matching Liberty files.
 
-Building the bench-tool use cases and a fresh-context critic review of that plan turned up hardware needs that firmware cannot cover. They were made in one batch before the next harden, costed by synthesis of `tempo_core` against HEAD: 24,451 to 24,742 cells, 360.8k to 364.9k um² (+1.1%), 3,216 to 3,263 flops.
+**Why:** All IHP corner names start with `nom_`, so a `nom_*` pattern selects the typical SRAM view at every corner and hides slow-corner SRAM delay.
 
-- `sti rd, rs`: threads store to the instruction SRAM (two slots, like `ldi`, through the thread's own fetch slot, so no other thread is delayed). Chosen over a deeper mailbox or a second RAM: the SRAM has ~800 spare words, which become receive buffers (UART console, bus monitor, edge capture) and emulated-device storage (a 24C02 image). Cost: two 26-bit latches.
-- External-clock receive (`MODE.XCLK`): a receive samples I on an edge of the C input instead of on its own timeline. Needed for passive SPI and I2C monitoring and for the receive half of target emulation; the firmware alternative (pattern event plus `ior`) loses bits silently because pattern events do not queue. Receive only: a transmit on an external clock would also be needed for an SPI target and was left out (cost and verification effort; I2C target transmit works with stretching and timed slots).
-- `CAP` latches only while no command runs (bug 18).
-- After an `emit`, C holds the emitted level (bug 17).
-- Host port on the RP2350's hardware SPI0 pins (SCK `ui[5]`, MOSI `ui[6]`, MISO `uo[3]`): the demo board for IHP shuttles carries an RP2350B, and `machine.SPI` moves bytes in C, where a Python bit-bang or PIO loop would bound every use case's throughput. Output index 11 moves to `uo[7]`. No cells.
-- Mailbox commands return the count the port will take or give and never exceed it, plus an error-summary bit, and the status command reports each lane's flags (bug 19). The host never needs a status read to stay correct, and reads one only when the error bit is set.
+**Rejected:** The template's `nom_*`, `min_*`, `max_*` mapping.
 
-Not taken from the critic review, with reasons: a separate IMEM read/write port for threads (the fetch-slot reuse above gives the same buffering at a fraction of the area); a channel-tagged mailbox in hardware (a firmware dispatcher does it, see the resident image); a CMSIS-DAP shim on the RP2350 (out of scope for silicon; the host library is the API, and a PC transport over the RP2350's USB serial is planned).
+## Lane 3 removed, lane 2 reduced
 
-## Lane 3 cut for routability, 2026-09-26
+**Decision:** Three lanes are built. Lanes 0 and 1 are full. Lane 2 has no NRZI, stuffing, CRC, `RESYNC` or `REL`. The 2-bit lane field stays, and an instruction that names lane 3 is illegal.
 
-The first full-design harden (commit 0e3dfa5, four lanes, 30,874 cells after placement, 54% utilization) did not route. The TT IHP flow routes signals on Metal2 to Metal4 only, so Metal3 is the single horizontal layer: global routing ended with Metal3 at 86% and 1,933 overflowed edges out of 2,081, and detailed routing went 32,154 / 16,593 / 15,902 violations over its first three iterations at about 35 minutes each. It was stopped there.
+**Why:** The four-lane design did not route. The flow routes signals on Metal2 to Metal4, which leaves Metal3 as the only horizontal layer, and it overflowed. Removing one reduced lane cut core cell area by about 15%. Every firmware image fits in three lanes.
 
-Chosen: the next step of the cut order, dropping lite lane 3. `tempo_core` synthesis: 24,742 to 20,840 cells, 364.9k to 309.7k um² (-15%). The ISA keeps the 2-bit lane field; an instruction on lane 3 is illegal (the thread halts and the host status reports it), so firmware can never silently target a missing lane. Every use case fits in three lanes: I2C moved to lane 2, the logic analyser's trigger moved to lane 0's A pin (patterns stay active in capture mode), and the three-lane concurrent cases (UART + I2C, JTAG, monitors) keep working.
+**Rejected:** Lower placement density (utilisation was already below the target). Routing on Metal1 (pin-access and precheck risk). Latch-based configuration registers (timing and verification cost).
 
-Considered: lowering placement density (not possible below the actual 54% utilization), routing on Metal1 (more horizontal capacity, but pin-access and precheck risk), latch-based configuration and register file (kept as the next levers; they trade area for timing and verification effort).
+## Declared clock
 
-## SPI throughput and rejected register-read trial, 2026-09-26
+**Decision:** 25 MHz, `CLOCK_PERIOD` 40 ns. <!-- CLOCK -->
 
-A parallel decoded-register read trial reduced local mapped core area from
-20,974 cells / 310,594.32 um² to 20,887 / 304,640.63 um², with unchanged
-2,767 flops. Read-port equivalence was proven and all functional tests
-passed. It is **not retained**: global routing required extended clock NDR
-retries, versus 5m41s for the baseline, and no higher usable clock
-speed was established. Routing is the binding constraint;
-a smaller synthesis number alone does not justify this tradeoff. Final RTL
-retains the original register muxes and the validated index-width fixes.
+**Why:** The design routed at a 20 ns target missed slow-corner setup by 9.19 ns, a minimum period of about 29.2 ns. <!-- CLOCK -->
+The demo board's RP2350 produces 25 MHz exactly (150 MHz / 6). <!-- CLOCK -->
+Host-library firmware computes its timing from the clock frequency, so the images do not depend on this choice.
 
-The SPI bulk firmware queues the next 16-bit transfer before receiving and
-storing the current word, then drains the final word explicitly. It keeps the
-two-half SRAM credit protocol and emits exactly 256 words per half. On the
-same cycle-model board at period 6, a 1024-byte read falls from 132,889 to
-125,614 cycles (5.47% fewer cycles, 5.79% more throughput). Host SPI transfer
-time is included; real board throughput remains unmeasured.
+**Rejected:** 50 MHz, which needs an RTL restructure that has not been done. <!-- CLOCK -->
 
-SPI now exposes the lane's existing LSB-first setting without extra RTL.
-Two-byte mailbox words are swapped for LSB-first transfers; odd tails keep
-the firmware's high-byte convention. Modes 0/2 require period >= 5, modes
-1/3 >= 6, and sample >= 4/5 respectively. Shorter settings return stale MISO
-on the cycle model despite valid MOSI framing. The API rejects them before
-loading firmware, and caps periods at 8191 to keep clock/sample offsets in
-their 13-bit fields. These are implementation limits, not universal SPI
-timing requirements; pad and target delays may raise the minima.
+## KLayout DRC as signoff, Magic DRC off
 
-The submission pin map and datasheet now match `src/project.v` and the
-RP2350 transport: HSCK `ui[5]`, HMOSI `ui[6]`, HMISO `uo[3]`, HCS_N `ui[7]`.
-The old labels would have wired the host incorrectly. Area stays 6×4 and the
-50 MHz clock remains a target pending slow-corner timing closure.
+**Decision:** `RUN_MAGIC_DRC` is false. KLayout DRC, LVS and the Tiny Tapeout precheck are the signoff checks.
 
-## SRAM power-domain gap, 2026-09-26
+**Why:** Magic reports false overlaps on the SRAM macro's LEF abstract.
 
-The 44 Magic extraction overlaps come from full-height Metal4 supply straps
-crossing a real LEF obstruction between VDD! and VDDARRAY!. All feedback
-boxes lie inside that gap, and none lies inside any declared supply pin.
-After allocation and tidy, the plugin now subtracts each intersecting SRAM
-Metal4 obstruction from both the straps and exported power-pin shapes,
-using the LEF spacing plus 0.05 µm clearance. Existing rail vias outside
-the macro feed each remaining segment. R0 and MX are handled explicitly.
-
-The exact plugin passes a pinned-flow PDN probe with zero power-grid errors.
-An independent OpenDB check finds 32 obstructed strap/pin shapes before
-the fix and zero after it. The number of database shapes differs from
-Magic's decomposed feedback boxes. A new full extraction/DRC/LVS run is
-still required before treating the overlap count as resolved at signoff.
-
-## Protocol startup and reprogramming, 2026-09-26
-
-Firmware replacement now uses a 73-word temporary cleanup image before the
-new image. Halting the barrel leaves autonomous lanes and their pin owners
-active; `stop` preserves configuration by design. The cleanup stops all
-lanes, restores writable lane registers, releases global GPIO and lane pin
-ownership, clears lane flags and all eight scratch words, and drains H2T.
-The host drains T2H before starting it and waits for its completion word.
-It uses the existing host port and ISA, with no RTL, area or reserved SRAM
-increase. The cost is extra startup transactions. `patch` remains an in-image
-parameter restart, rather than a firmware replacement.
-
-UART startup waits for an armed-receive acknowledgement, and bit timing
-rounds the complete fixed-point value with a prescaler constrained by SAMP's
-13 bits. This preserves the first incoming character and midpoint sampling
-at low rates. Protocol tests include 300 to 2400 baud with a 2% slow sender.
-
-I2C waits for every write-byte ACK before queuing another command. This
-adds host round trips for writes, but prevents bytes or reads after a NACK.
-Receive bytes still use four-word batches.
-
-The UART-trigger tool rejects frames lasting at least 32768 core cycles.
-It otherwise silently schedules from a wrapped 16-bit CAP timestamp: the
-9600-baud reproduction takes 125540 cycles for a requested delay of 60000.
-Its firmware also has no prescaler configuration. Extending that tool to
-slow rates requires a wider software timebase and explicit prescaler
-handling; a rate accepted by the UART console is not automatically valid
-for this trigger tool. The restriction scales with the actual chip clock.
-
-## SRAM timing views, 2026-09-26
-
-Use `nom_typ_*`, `nom_fast_*` and `nom_slow_*` to select the macro's matching
-Liberty files. IHP standard-cell corners all start with `nom_`; the previous
-`nom_*`/`min_*`/`max_*` mapping selected the typical SRAM view at every corner.
-Three regressions use the actual IHP corner names and check the selected
-filenames. The supplied fast macro is characterized at -55 C, while the
-standard-cell fast corner is -40 C; preserve that explicit difference.
-Prior fast/slow macro timing is superseded and needs a fresh physical run.
-The `goal_slow_corner` probe additionally tests slow-default mapping and
-timing repair at the unchanged 20 ns period before considering a full route.
-
-## Complete source submission, 2026-09-26
-
-The export now preserves tracked RTL, firmware, host code, assembler, cycle
-model, independent protocol models, tests, formal jobs, flow integration,
-design documentation and evidence notes. It copies the real README and CI
-workflows without rewriting them. Excluding firmware and verification made
-the former export impossible to reproduce and contradicted the open-source
-submission requirement.
-
-Exporting prepares staged files in a clean linked worktree; it does not
-commit or publish. The source checkout, an unrelated repository and a dirty
-destination are rejected before removal. Disposable-repository regressions
-exercise the exporter, image regeneration, assembler/ISA tests and host
-imports without modifying a real public branch. Preparing the actual public
-submission still follows clean signoff and review.
-
-## Declared clock 25 MHz, 2026-09-30
-
-`CLOCK_PERIOD` 40 ns, `info.yaml` `clock_hz` 25000000. The last routed signoff harden (`5a0aa4c`, 50 MHz) missed slow-corner setup by 9.19 ns reg-to-reg (1,244 violating paths; typ +1.68 ns), a minimum slow-corner period of about 29.2 ns. That run also timed the SRAM at the typ view in every corner (`nom_*` matched all three IHP corners); the per-corner views now select slow/fast SRAM timing, so the slow corner is somewhat worse than 29.2 ns measured. 40 ns leaves about 10 ns over the old measurement for that and for a routing change, and there is budget for one harden with no retry. 25 MHz is what the RP2350 demo board makes exactly (150 MHz / 6). No RTL restructure for 50 MHz fits this session; 50 MHz stays a future target, not a claim.
-
-Firmware images are cycle-parametrised: the host library computes every baud, SCK and I2C slot from `Link.clock_hz`, which now defaults to the transport's clock or to 25 MHz (`host/tempo_host/link.py` `CHIP_CLOCK_HZ`). The RTL and gate-level cocotb suites are cycle-accurate and still simulate a 20 ns clock period; their protocol models are parameterised by the same cycle counts, so they verify identical cycle-level behaviour at any clock. Absolute protocol rates in `docs/benchmarks.md` are at 25 MHz. Fixed-constant firmware written for 50 MHz (`fw/usb_ls_phy.s` BITLEN 33, `fw/manchester.s`, `fw/demo_multibus.s`) runs at half the rate it was written for at 25 MHz; USB low speed at 25 MHz needs 16.67 cycles/bit and is not claimed at this clock.
+**Rejected:** Keeping Magic DRC as a gate, which fails on the false overlaps.
