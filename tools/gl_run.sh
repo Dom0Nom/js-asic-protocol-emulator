@@ -19,7 +19,7 @@ rsync -a --exclude sim_build --exclude results.xml --exclude '*.fst' "$ROOT/test
 for x in src tools host fw info.yaml; do ln -sfn "$ROOT/$x" "$D/$x"; done
 cp "$NL" "$D/test/gate_level_netlist.v"
 echo "commit $(git -C "$ROOT" rev-parse --short HEAD) dirty_tracked=$(git -C "$ROOT" status --porcelain -uno | wc -l | tr -d ' ') clock_hz=$(sed -n 's/^ *clock_hz: *\([0-9]*\).*/\1/p' "$ROOT/info.yaml") gate level${SDF:+ SDF $(basename "$SDF")} start $(date)"
-echo "netlist sha256 $(shasum -a 256 "$NL" | cut -d' ' -f1)"
+echo "netlist sha256 $( (sha256sum "$NL" 2>/dev/null || shasum -a 256 "$NL") | cut -d' ' -f1)"
 if [ -n "${SDF:-}" ]; then
   # Icarus cannot parse the SRAM macro's bus-indexed IOPATHs and aborts the
   # rest of the file; its behavioral model has no specify block, so drop it.

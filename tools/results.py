@@ -5,7 +5,7 @@ results/ holds the signoff metrics of the hardened design and one summary
 per test log. Every summary starts with the header line its runner printed:
 commit, number of modified tracked files, clock.
 
-    tools/results.py add <name> <log>   store the summary of a log as results/<name>.log
+    tools/results.py add <name> <log>...   store the summary of one or more logs as results/<name>.log
     tools/results.py                    rewrite the tables
     tools/results.py --check            fail if a table is stale
 """
@@ -38,7 +38,8 @@ LOGS = [
 def summarise(log):
     lines = Path(log).read_text(errors="replace").splitlines()
     out = [ln.strip() for ln in lines if KEEP.search(ln)]
-    return "\n".join(ln[-200:] for ln in out) + "\n"
+    steps = [ln.strip() for ln in lines if "Checking assertions in step" in ln]
+    return "\n".join(ln[-200:] for ln in out + steps[-1:]) + "\n"
 
 
 def outcome(text):
@@ -59,6 +60,9 @@ def outcome(text):
         parts.append("{:,} instruction commits matched".format(sum(map(int, m))))
     sby = re.findall(r"\[(\w+)\] DONE \((\w+)", text)
     parts += ["%s %s" % (task.split("_")[-1], res) for task, res in sby]
+    step = re.findall(r"\[\w+_bmc\].*Checking assertions in step (\d+)", text)
+    if step and not any(task.endswith("_bmc") for task, _ in sby):
+        parts.append("bmc: no counterexample through step %d, then timeout" % (int(step[-1]) - 1))
     return "; ".join(parts) or "no result"
 
 
@@ -131,6 +135,7 @@ def apply(check):
 
 if __name__ == "__main__":
     if sys.argv[1:2] == ["add"]:
-        (RES / (sys.argv[2] + ".log")).write_text(summarise(sys.argv[3]))
+        RES.mkdir(exist_ok=True)
+        (RES / (sys.argv[2] + ".log")).write_text("".join(summarise(f) for f in sys.argv[3:]))
     else:
         apply("--check" in sys.argv)
