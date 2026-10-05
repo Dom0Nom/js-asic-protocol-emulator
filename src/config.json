@@ -16,15 +16,22 @@
   "PL_TARGET_DENSITY_PCT": 60,
 
   "//": "CLOCK_PERIOD - Increase this in case you are getting setup time violations.",
-  "//": "The value is in nanoseconds, so 40ns == 25MHz.",
-  "CLOCK_PERIOD": 40,
+  "//": "The value is in nanoseconds, so 33.333ns == 30MHz.",
+  "CLOCK_PERIOD": 33.333,
 
   "//": "Hold slack margin - Increase them in case you are getting hold violations.",
   "PL_RESIZER_HOLD_SLACK_MARGIN": 0.1,
   "GRT_RESIZER_HOLD_SLACK_MARGIN": 0.05,
 
-  "//": "Electrical repair: the 25 MHz harden at c3ffca5 met timing but left max slew 135 (slow), max cap 13 and max fanout 213 (clock leaf buffers with 16-17 sinks). 8-sink CTS clusters target those. Post-GRT design repair hung in RepairDesignPostGRT (harden at f02668d), so it stays off. OPENROAD_THREADS unset gave single-threaded detailed routing; 10 = PC cores minus 2.",
-  "RUN_POST_GRT_DESIGN_REPAIR": false,
+  "//": "Timing and electrical repair run at the slow and fast corners (the default is typical only, which left slow-corner slew violations and did no setup optimisation where it mattered). Post-GRT design repair takes about 50 min but converges. CTS clusters of 8 sinks. OPENROAD_THREADS: detailed routing is single-threaded without it.",
+  "PNR_CORNERS": ["nom_slow_1p08V_125C", "nom_fast_1p32V_m40C"],
+  "RSZ_CORNERS": ["nom_slow_1p08V_125C", "nom_fast_1p32V_m40C"],
+  "CTS_CORNERS": ["nom_slow_1p08V_125C", "nom_fast_1p32V_m40C"],
+  "DESIGN_REPAIR_MAX_SLEW_PCT": 30,
+  "DESIGN_REPAIR_MAX_CAP_PCT": 30,
+  "RUN_POST_GRT_DESIGN_REPAIR": true,
+  "GRT_DESIGN_REPAIR_MAX_SLEW_PCT": 20,
+  "GRT_DESIGN_REPAIR_MAX_CAP_PCT": 20,
   "CTS_SINK_CLUSTERING_SIZE": 8,
   "OPENROAD_THREADS": 10,
 
@@ -44,6 +51,7 @@
 
   "//": "SRAM macro (instruction memory). Power: Project.ExtendPowerStripes (librelane_plugin_sram_pdn.py) redraws the Metal4 stripes over the macro supply columns after GeneratePDN, because the single-layer TT grid cannot reach them.",
   "meta": { "flow": "Classic", "substituting_steps": { "+OpenROAD.GeneratePDN": "Project.ExtendPowerStripes" } },
+  "//": "The PDK ships the SRAM fast timing view only at -55 C; it stands in for the -40 C corner.",
   "MACROS": {
     "RM_IHPSG13_1P_1024x16_c2_bm_bist": {
       "gds": ["pdk_dir::libs.ref/sg13cmos5l_sram/gds/RM_IHPSG13_1P_1024x16_c2_bm_bist.gds"],
