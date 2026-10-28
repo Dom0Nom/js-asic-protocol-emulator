@@ -1,5 +1,7 @@
 # Tempo
 
+> **Work in progress.** Entry for the Jane Street protocol emulator ASIC competition (deadline 2027-01-18). RTL, firmware, tests and physical results change often; nothing here is final until the submission is tagged.
+
 Tempo is a programmable protocol emulator for the [Jane Street ASIC
 competition](https://blog.janestreet.com/protocol-emulator-asic-competition/):
 IHP 130 nm CMOS5L, 6x4 Tiny Tapeout tiles. Protocols are firmware. The chip
